@@ -1,0 +1,693 @@
+#!/usr/bin/env python3
+"""
+FITS File Organizer for Astrophotography v6
+Organizes FITS files with proper hierarchy and timestamp-based naming
+"""
+
+import os
+import shutil
+from datetime import datetime, timedelta
+import re
+import math
+import sys
+from collections import defaultdict
+
+try:
+    from astropy.io import fits
+    ASTROPY_AVAILABLE = True
+except ImportError:
+    ASTROPY_AVAILABLE = False
+    print("Warning: astropy not available. Install with: pip install astropy")
+
+def sanitize_name(name):
+    """Convert name to lowercase and replace spaces/special chars with underscores"""
+    if name is None:
+        return "unknown"
+    name = str(name).lower()
+    name = re.sub(r'[^a-z0-9._-]', '_', name)
+    name = re.sub(r'_+', '_', name)
+    name = name.strip('_')
+    return name if name else "unknown"
+
+def extract_timestamp(filepath, header=None):
+    """Extract timestamp from FITS header or file"""
+    if header:
+        date_obs = header.get('DATE-OBS', header.get('DATE', None))
+        if date_obs:
+            try:
+                # Parse ISO format timestamp
+                date_obj = datetime.fromisoformat(date_obs.replace('Z', '+00:00'))
+                # Format with milliseconds (first 3 digits of microseconds)
+                milliseconds = date_obj.microsecond // 1000
+                return f"{date_obj.strftime('%Y%m%d_%H%M%S')}_{milliseconds:03d}"
+            except:
+                pass
+    
+    # Fallback to file modification time
+    try:
+        mtime = os.path.getmtime(filepath)
+        dt = datetime.fromtimestamp(mtime)
+        milliseconds = dt.microsecond // 1000
+        return f"{dt.strftime('%Y%m%d_%H%M%S')}_{milliseconds:03d}"
+    except:
+        dt = datetime.now()
+        milliseconds = dt.microsecond // 1000
+        return f"{dt.strftime('%Y%m%d_%H%M%S')}_{milliseconds:03d}"
+
+def extract_metadata(filepath):
+    """Extract metadata from FITS file"""
+    if not ASTROPY_AVAILABLE:
+        return None
+    
+    try:
+        with fits.open(filepath) as hdul:
+            header = hdul[0].header
+            
+            # Frame type
+            frame_type = header.get('FRAME', header.get('IMAGETYP', 'Unknown'))
+            frame_type = sanitize_name(frame_type)
+            
+            # Exposure time
+            exposure = header.get('EXPTIME', header.get('EXPOSURE', 0.0))
+            try:
+                exposure = float(exposure)
+            except (ValueError, TypeError):
+                exposure = 0.0
+            
+            # Gain
+            gain = header.get('GAIN', 'unknown')
+            gain = sanitize_name(str(gain))
+            if not gain.startswith('gain'):
+                gain = f'gain{gain}'
+            
+            # Filter
+            filter_val = header.get('FILTER', None)
+            if filter_val is not None:
+                filter_str = sanitize_name(str(filter_val))
+            else:
+                filter_str = None  # No filter (e.g., OSC camera)
+            
+            # Temperature (round to nearest degree)
+            temp = header.get('CCD-TEMP', header.get('SET-TEMP', None))
+            temp_raw = None
+            if temp is not None:
+                try:
+                    temp_raw = float(temp)
+                    temp_rounded = round(temp_raw)
+                    temp_str = f'{temp_rounded}c' if temp_rounded >= 0 else f'minus{abs(temp_rounded)}c'
+                except (ValueError, TypeError):
+                    temp_str = 'unknown_temp'
+            else:
+                temp_str = 'unknown_temp'
+            
+            # Target object
+            target = header.get('OBJECT', header.get('OBJNAME', 'unknown'))
+            # Fix Messier/NGC spacing before sanitization (M 31 -> M31, NGC 224 -> NGC224)
+            target = re.sub(r'([MN])\s+(\d+)', r'\1\2', str(target), flags=re.IGNORECASE)
+            target = sanitize_name(target)
+            
+            # Date observation for session grouping
+            date_obs = header.get('DATE-OBS', header.get('DATE', None))
+            if date_obs:
+                try:
+                    date_obj = datetime.fromisoformat(date_obs.replace('Z', '+00:00'))
+                    
+                    # Midnight adjustment: if before noon, use previous day's session
+                    if date_obj.hour < 12:
+                        date_obj = date_obj - timedelta(days=1)
+                    
+                    session_date = date_obj.strftime('%Y%m%d')
+                except:
+                    session_date = 'unknown_date'
+            else:
+                # Try to extract from filename
+                basename = os.path.basename(filepath)
+                date_match = re.search(r'(\d{8})', basename)
+                if date_match:
+                    session_date = date_match.group(1)
+                else:
+                    session_date = 'unknown_date'
+            
+            # Get timestamp for filename
+            timestamp = extract_timestamp(filepath, header)
+            
+            return {
+                'frame_type': frame_type,
+                'exposure': exposure,
+                'gain': gain,
+                'filter': filter_str,
+                'temp': temp_str,
+                'temp_raw': temp_raw,
+                'target': target,
+                'session_date': session_date,
+                'timestamp': timestamp
+            }
+    except Exception as e:
+        print(f"Error reading {filepath}: {e}")
+        return None
+
+def format_exposure(exp_seconds):
+    """Format exposure time for folder name"""
+    if exp_seconds == 0:
+        return '0s'
+    elif exp_seconds < 1:
+        return f'{int(exp_seconds * 1000)}ms'
+    else:
+        return f'{int(exp_seconds)}s'
+
+def round_temp(temp):
+    """Round temperature using floor(temp + 0.5) for consistent rounding"""
+    return math.floor(temp + 0.5)
+
+def format_temp_folder(temp_int):
+    """Format a single temperature integer as folder name"""
+    if temp_int >= 0:
+        return f'{temp_int}c'
+    else:
+        return f'minus{abs(temp_int)}c'
+
+def format_temp_range(min_temp, max_temp):
+    """Format temperature range for folder name using floor/ceil"""
+    min_int = math.floor(min_temp)
+    max_int = math.ceil(max_temp)
+    
+    min_str = f'{min_int}c' if min_int >= 0 else f'minus{abs(min_int)}c'
+    max_str = f'{max_int}c' if max_int >= 0 else f'minus{abs(max_int)}c'
+    
+    return f'{min_str}_to_{max_str}'
+
+def determine_temp_folders(temps, is_calibration):
+    """
+    Determine temperature folder structure for a group of frames
+    
+    Returns: dict mapping each temp to its folder suffix
+    
+    For calibration frames: individual rounded temp folders
+    For session frames: range-based folders with deviants if needed
+    """
+    if not temps:
+        return {}
+    
+    # For calibration library: use individual rounded temps
+    if is_calibration:
+        temp_folders = {}
+        for temp in temps:
+            rounded = round_temp(temp)
+            temp_folders[temp] = format_temp_folder(rounded)
+        return temp_folders
+    
+    # For session frames: check range
+    min_temp = min(temps)
+    max_temp = max(temps)
+    temp_range = max_temp - min_temp
+    
+    temp_folders = {}
+    
+    if temp_range <= 4.0:
+        # All temps fit in one folder
+        folder_name = format_temp_range(min_temp, max_temp)
+        for temp in temps:
+            temp_folders[temp] = folder_name
+    else:
+        # Find the 4°C window that contains the most frames
+        # Try windows starting at each unique temp
+        best_window_start = None
+        best_count = 0
+        
+        for start_temp in sorted(set(temps)):
+            count = sum(1 for t in temps if start_temp <= t <= start_temp + 4.0)
+            if count > best_count:
+                best_count = count
+                best_window_start = start_temp
+        
+        window_end = best_window_start + 4.0
+        
+        # Main folder for temps in the window
+        main_folder = format_temp_range(best_window_start, window_end)
+        
+        # Determine folder for each temp
+        for temp in temps:
+            if best_window_start <= temp <= window_end:
+                temp_folders[temp] = main_folder
+            elif temp < best_window_start:
+                # Below range
+                below_min = math.floor(best_window_start)
+                below_str = f'{below_min}c' if below_min >= 0 else f'minus{abs(below_min)}c'
+                temp_folders[temp] = os.path.join(main_folder, f'below_{below_str}')
+            else:
+                # Above range
+                above_max = math.ceil(window_end)
+                above_str = f'{above_max}c' if above_max >= 0 else f'minus{abs(above_max)}c'
+                temp_folders[temp] = os.path.join(main_folder, f'above_{above_str}')
+    
+    return temp_folders
+
+def get_output_path(metadata, output_base, use_calibration_library, temp_folder):
+    """
+    Determine output path based on frame type
+    
+    Calibration Library (darks/bias):
+      calibration/darks/<gain>/<exposure>/<temp>/
+      calibration/bias/<gain>/<temp>/
+    
+    Session structure (lights/flats, or darks/bias if CalibLib=No):
+      sessions/<date>/darks/<gain>/<exposure>/<filter?>/<temp_range>/
+      sessions/<date>/bias/<gain>/<filter?>/<temp_range>/
+      sessions/<date>/flats/<gain>/<filter?>/<temp_range>/
+      sessions/<date>/<target>/<gain>/<exposure>/<filter?>/<temp_range>/
+    
+    Filter is optional - only added if present in metadata
+    temp_folder: the temperature folder suffix (e.g., 'minus20c' or 'minus21c_to_minus18c')
+    """
+    frame_type = metadata['frame_type']
+    filter_str = metadata.get('filter', None)
+    
+    is_dark = 'dark' in frame_type
+    is_bias = 'bias' in frame_type
+    is_flat = 'flat' in frame_type
+    is_light = not (is_dark or is_bias or is_flat)
+    
+    if use_calibration_library and (is_dark or is_bias):
+        # Calibration library: gain -> exposure -> temp (no filter)
+        if is_dark:
+            exp_str = format_exposure(metadata['exposure'])
+            path = os.path.join(
+                output_base,
+                'calibration',
+                'darks',
+                metadata['gain'],
+                exp_str,
+                temp_folder
+            )
+        else:  # bias
+            path = os.path.join(
+                output_base,
+                'calibration',
+                'bias',
+                metadata['gain'],
+                temp_folder
+            )
+    else:
+        # Session-based structure
+        session_base = os.path.join(
+            output_base,
+            'sessions',
+            metadata['session_date']
+        )
+        
+        if is_dark:
+            exp_str = format_exposure(metadata['exposure'])
+            path_parts = [session_base, 'darks', metadata['gain'], exp_str]
+            if filter_str:
+                path_parts.append(filter_str)
+            path_parts.append(temp_folder)
+            path = os.path.join(*path_parts)
+        elif is_bias:
+            path_parts = [session_base, 'bias', metadata['gain']]
+            if filter_str:
+                path_parts.append(filter_str)
+            path_parts.append(temp_folder)
+            path = os.path.join(*path_parts)
+        elif is_flat:
+            path_parts = [session_base, 'flats', metadata['gain']]
+            if filter_str:
+                path_parts.append(filter_str)
+            path_parts.append(temp_folder)
+            path = os.path.join(*path_parts)
+        else:  # lights
+            exp_str = format_exposure(metadata['exposure'])
+            path_parts = [session_base, metadata['target'], metadata['gain'], exp_str]
+            if filter_str:
+                path_parts.append(filter_str)
+            path_parts.append(temp_folder)
+            path = os.path.join(*path_parts)
+    
+    return path
+
+def generate_filename(original_filepath, metadata, rename_files):
+    """Generate output filename with timestamp suffix including milliseconds"""
+    original_name = os.path.basename(original_filepath)
+    name_without_ext = os.path.splitext(original_name)[0]
+    ext = os.path.splitext(original_filepath)[1]
+    
+    if rename_files:
+        # Generate standardized name: frametype_target_filter_exposure_gain_temp
+        exp_str = format_exposure(metadata['exposure'])
+        filter_str = metadata.get('filter', None)
+        
+        if filter_str:
+            base_name = f"{metadata['frame_type']}_{metadata['target']}_{filter_str}_{exp_str}_{metadata['gain']}_{metadata['temp']}"
+        else:
+            base_name = f"{metadata['frame_type']}_{metadata['target']}_{exp_str}_{metadata['gain']}_{metadata['temp']}"
+        base_name = sanitize_name(base_name)
+    else:
+        # Use original name (sanitized to lowercase)
+        base_name = sanitize_name(name_without_ext)
+    
+    # Add timestamp suffix with milliseconds: _YYYYMMDD_HHMMSS_mmm
+    filename = f"{base_name}_{metadata['timestamp']}{ext}"
+    
+    return filename
+
+def organize_fits_files(input_folder, output_folder, use_calibration_library=True, rename_files=False):
+    """Organize FITS files from input_folder into output_folder structure"""
+    if not ASTROPY_AVAILABLE:
+        print("Cannot proceed without astropy. Please install it.")
+        return
+    
+    # Find all FITS files
+    fits_files = []
+    for root, dirs, files in os.walk(input_folder):
+        for file in files:
+            if file.lower().endswith(('.fit', '.fits', '.fts')):
+                fits_files.append(os.path.join(root, file))
+    
+    if not fits_files:
+        print(f"No FITS files found in {input_folder}")
+        return
+    
+    print(f"\nFound {len(fits_files)} FITS files to organize...\n")
+    print("Pass 1: Reading metadata from all files...\n")
+    
+    # Pass 1: Extract all metadata
+    file_metadata = []
+    for i, filepath in enumerate(fits_files, 1):
+        if i % 50 == 0:
+            print(f"  Reading file {i}/{len(fits_files)}...")
+        
+        metadata = extract_metadata(filepath)
+        if metadata is not None:
+            file_metadata.append({
+                'filepath': filepath,
+                'metadata': metadata
+            })
+    
+    print(f"Successfully read metadata from {len(file_metadata)} files\n")
+    
+    # Sort files by timestamp for chronological processing
+    print("Sorting files by timestamp...\n")
+    file_metadata.sort(key=lambda x: x['metadata']['timestamp'])
+    
+    # Group files by (session_date, target, frame_type, gain, exposure, filter)
+    groups = defaultdict(list)
+    for item in file_metadata:
+        metadata = item['metadata']
+        frame_type = metadata['frame_type']
+        
+        is_dark = 'dark' in frame_type
+        is_bias = 'bias' in frame_type
+        
+        # Determine if this will go to calibration library
+        is_calibration = use_calibration_library and (is_dark or is_bias)
+        
+        # Create group key
+        if is_calibration:
+            # Calibration library groups: frame_type, gain, exposure (no filter)
+            if is_dark:
+                group_key = ('calibration', frame_type, metadata['gain'], metadata['exposure'])
+            else:  # bias
+                group_key = ('calibration', frame_type, metadata['gain'], None)
+        else:
+            # Session groups: session_date, target, frame_type, gain, exposure, filter
+            filter_str = metadata.get('filter', None)
+            group_key = (metadata['session_date'], metadata['target'], frame_type, 
+                        metadata['gain'], metadata['exposure'], filter_str)
+        
+        groups[group_key].append(item)
+    
+    print(f"Grouped files into {len(groups)} unique combinations\n")
+    
+    # Determine temperature folders for each group
+    temp_folder_map = {}  # Maps (filepath) -> temp_folder_suffix
+    
+    for group_key, items in groups.items():
+        # Extract temperatures (only valid ones)
+        temps = [item['metadata']['temp_raw'] for item in items 
+                if item['metadata']['temp_raw'] is not None]
+        
+        if not temps:
+            # No valid temperatures, use 'unknown_temp' for all
+            for item in items:
+                temp_folder_map[item['filepath']] = 'unknown_temp'
+            continue
+        
+        # Determine if this group uses calibration structure
+        is_calibration = group_key[0] == 'calibration'
+        
+        # Get temperature folder assignments
+        temp_folders = determine_temp_folders(temps, is_calibration)
+        
+        # Map each file to its temperature folder
+        for item in items:
+            temp_raw = item['metadata']['temp_raw']
+            if temp_raw is not None:
+                temp_folder_map[item['filepath']] = temp_folders.get(temp_raw, 'unknown_temp')
+            else:
+                temp_folder_map[item['filepath']] = 'unknown_temp'
+    
+    # Create output folder if it doesn't exist
+    os.makedirs(output_folder, exist_ok=True)
+    
+    # Create TSV log file
+    timestamp_now = datetime.now()
+    milliseconds = timestamp_now.microsecond // 1000
+    tsv_timestamp = f"{timestamp_now.strftime('%Y%m%d_%H%M%S')}_{milliseconds:03d}"
+    tsv_filename = f'organize_log_{tsv_timestamp}.tsv'
+    tsv_path = os.path.join(output_folder, tsv_filename)
+    
+    print("Pass 2: Organizing files...\n")
+    
+    processed = 0
+    skipped = 0
+    
+    # Open TSV file for writing
+    with open(tsv_path, 'w') as tsv_file:
+        # Write header with metadata columns
+        tsv_file.write('sequence_number\torigin_file\tdestination_file\taction\tframe_type\ttarget\tfilter\texposure_sec\tgain\ttemperature_c\ttemp_folder\ttimestamp\n')
+        
+        sequence_number = 0
+        
+        # Process files that had valid metadata
+        for item in file_metadata:
+            sequence_number += 1
+            filepath = item['filepath']
+            metadata = item['metadata']
+            
+            # Get temperature folder for this file
+            temp_folder = temp_folder_map.get(filepath, 'unknown_temp')
+            
+            # Determine output directory
+            output_dir = get_output_path(metadata, output_folder, use_calibration_library, temp_folder)
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Generate filename with timestamp
+            new_filename = generate_filename(filepath, metadata, rename_files)
+            output_path = os.path.join(output_dir, new_filename)
+            
+            # Prepare metadata fields for TSV
+            frame_type = metadata['frame_type']
+            # Target only for light frames
+            target = metadata['target'] if 'light' in frame_type else ''
+            filter_str = metadata.get('filter', '')
+            exposure = metadata['exposure']
+            gain = metadata['gain']
+            
+            # Temperature value for TSV
+            temp_raw = metadata['temp_raw']
+            if temp_raw is not None:
+                temp_value = f'{temp_raw:.1f}'
+            else:
+                temp_value = ''
+            
+            timestamp_str = metadata['timestamp']
+            
+            # Check if file already exists
+            if os.path.exists(output_path):
+                print(f"→ {os.path.basename(filepath)} - already exists, skipping")
+                # Log the skip with destination and metadata
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_exists\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
+                skipped += 1
+                continue
+            
+            # Copy file
+            try:
+                shutil.copy2(filepath, output_path)
+                
+                # Format display
+                exp_display = format_exposure(metadata['exposure'])
+                if temp_raw is not None:
+                    temp_display = f'{temp_raw:.1f}°C'
+                else:
+                    temp_display = 'unknown'
+                
+                filter_display = f" | {filter_str}" if filter_str else ""
+                print(f"✓ {os.path.basename(filepath)} -> {metadata['frame_type'].title()} | {exp_display} | {metadata['gain']}{filter_display} | {temp_display} | {temp_folder}")
+                
+                # Log successful copy with metadata
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tcopied\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
+                processed += 1
+                
+            except Exception as e:
+                print(f"✗ Error copying {os.path.basename(filepath)}: {e}")
+                # Log the error with metadata
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_error\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
+                skipped += 1
+        
+        # Process files that couldn't be read
+        skipped_files = set(fits_files) - {item['filepath'] for item in file_metadata}
+        for filepath in skipped_files:
+            sequence_number += 1
+            print(f"✗ Skipped {os.path.basename(filepath)} - couldn't read metadata")
+            tsv_file.write(f'{sequence_number}\t{filepath}\t\tskipped_unreadable\t\t\t\t\t\t\t\t\n')
+            skipped += 1
+    
+    # Summary
+    print("\n" + "=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    print(f"Processed : {processed} files")
+    if skipped > 0:
+        print(f"Skipped   : {skipped} files")
+    print("=" * 60)
+    print(f"Output location: {output_folder}")
+    print(f"Log file: {tsv_path}")
+    print("\nDone!")
+
+def main_interactive():
+    """Interactive mode - prompt user for inputs"""
+    print("=" * 60)
+    print("FITS File Organizer for Astrophotography v6")
+    print("=" * 60)
+    print()
+    
+    if not ASTROPY_AVAILABLE:
+        print("ERROR: astropy is required but not installed")
+        print("Install it with: pip install astropy")
+        return
+    
+    try:
+        print("Note: GUI not available, using text input\n")
+        
+        input_folder = input("Enter input folder path (where FITS files are): ").strip()
+        output_folder = input("Enter output folder path (where to organize files): ").strip()
+        
+        if not os.path.exists(input_folder):
+            print(f"Error: Input folder '{input_folder}' does not exist")
+            return
+        
+        print(f"\nInput:  {input_folder}")
+        print(f"Output: {output_folder}\n")
+        
+        print("Use CalibrationLibrary structure for darks/bias?")
+        print("  Yes: Darks and Bias go to reusable calibration/ folder")
+        print("  No:  All files stay within session-specific folders")
+        use_calib = input("Use CalibrationLibrary? [Y/n]: ").strip().lower()
+        use_calibration_library = use_calib != 'n'
+        print()
+        
+        print("Rename files to standardized format?")
+        print("  Yes: Files renamed to frametype_target_filter_exposure_gain_temp_timestamp_ms.fit")
+        print("  No:  Keep original names (lowercase) with _timestamp_ms.fit suffix")
+        rename = input("Rename files? [Y/n]: ").strip().lower()
+        rename_files = rename != 'n'
+        print()
+        
+        print("Starting organization...\n")
+        
+        organize_fits_files(input_folder, output_folder, use_calibration_library, rename_files)
+        
+    except KeyboardInterrupt:
+        print("\n\nOperation cancelled by user")
+    except Exception as e:
+        print(f"\nError: {e}")
+
+def main_cli():
+    """CLI mode - parse command-line arguments"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='FITS File Organizer for Astrophotography',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Organizes astrophotography FITS files into a structured hierarchy based on 
+metadata extracted from file headers. Designed for deep-sky imaging workflows 
+with temperature-controlled cameras.
+
+Key Features:
+  • Smart temperature grouping: Frames within 4°C grouped together, outliers 
+    separated into deviant subfolders
+  • Filter support: Organizes by filter (Ha, OIII, SII, LRGB, etc.) when present
+  • Calibration library: Reusable darks/bias separate from session-specific frames
+  • Collision-proof: Millisecond-precision timestamps prevent filename conflicts
+  • Audit trail: TSV log tracks all file operations with full metadata
+
+Directory Structure:
+  Sessions: sessions/<date>/<target>/<gain>/<exposure>/<filter?>/<temp_range>/
+  Calibration: calibration/darks/<gain>/<exposure>/<temp_rounded>/
+  
+  Temperature folders use floor/ceil ranges (e.g., minus21c_to_minus18c) for 
+  session frames. Outliers beyond 4°C tolerance go to above_*/below_* subfolders.
+  
+  Gain prioritized over exposure in hierarchy to facilitate matching lights with 
+  flats (which require gain-matching, not exposure-matching). Filter included 
+  when present in FITS headers.
+  
+  Note: For multiple cameras, organize at a higher level (e.g., create separate 
+  output folders like /organized/asi294mc_askar/ and /organized/asi294mc_c9/). 
+  Calibration frames are camera-specific and should not be mixed between cameras.
+
+Examples:
+  Interactive mode:
+    %(prog)s
+  
+  CLI mode - basic organization:
+    %(prog)s /raw/data /organized/asi294mc_pro
+  
+  CLI mode - with file renaming:
+    %(prog)s /raw/data /organized/asi294mc_pro --rename
+  
+  CLI mode - session-only (no calibration library):
+    %(prog)s /raw/data /organized/asi294mc_pro --no-calib-library
+'''
+    )
+    parser.add_argument('input_folder', help='Input folder path (where FITS files are)')
+    parser.add_argument('output_folder', help='Output folder path (where to organize files)')
+    parser.add_argument('--no-calib-library', action='store_true',
+                       help='Do not use calibration library structure (default: use calibration library)')
+    parser.add_argument('--rename', action='store_true',
+                       help='Rename files to standardized format (default: keep original names)')
+    
+    args = parser.parse_args()
+    
+    if not ASTROPY_AVAILABLE:
+        print("ERROR: astropy is required but not installed")
+        print("Install it with: pip install astropy")
+        sys.exit(1)
+    
+    if not os.path.exists(args.input_folder):
+        print(f"Error: Input folder '{args.input_folder}' does not exist")
+        sys.exit(1)
+    
+    print("=" * 60)
+    print("FITS File Organizer for Astrophotography v6")
+    print("=" * 60)
+    print()
+    print(f"Input:  {args.input_folder}")
+    print(f"Output: {args.output_folder}")
+    print(f"Calibration Library: {not args.no_calib_library}")
+    print(f"Rename Files: {args.rename}")
+    print()
+    
+    organize_fits_files(
+        args.input_folder,
+        args.output_folder,
+        use_calibration_library=not args.no_calib_library,
+        rename_files=args.rename
+    )
+
+if __name__ == '__main__':
+    # Detect mode based on arguments
+    if len(sys.argv) > 1:
+        main_cli()
+    else:
+        main_interactive()
