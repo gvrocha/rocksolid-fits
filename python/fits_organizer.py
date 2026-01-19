@@ -85,7 +85,7 @@ def extract_metadata(filepath):
             if filter_val is not None:
                 filter_str = sanitize_name(str(filter_val))
             else:
-                filter_str = None  # No filter (e.g., OSC camera)
+                filter_str = 'nofilter'  # Explicit marker for OSC camera or missing filter info
             
             # Temperature (round to nearest degree)
             temp = header.get('CCD-TEMP', header.get('SET-TEMP', None))
@@ -143,7 +143,7 @@ def extract_metadata(filepath):
                 'timestamp': timestamp
             }
     except Exception as e:
-        print(f"Error reading {filepath}: {e}")
+        # Suppress console output - error will be counted in Pass 2
         return None
 
 def format_exposure(exp_seconds):
@@ -288,7 +288,7 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
                 temp_folder
             )
     else:
-        # Session-based structure
+        # Session-based structure - always include filter
         session_base = os.path.join(
             output_base,
             'sessions',
@@ -297,30 +297,14 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
         
         if is_dark:
             exp_str = format_exposure(metadata['exposure'])
-            path_parts = [session_base, 'darks', metadata['gain'], exp_str]
-            if filter_str:
-                path_parts.append(filter_str)
-            path_parts.append(temp_folder)
-            path = os.path.join(*path_parts)
+            path = os.path.join(session_base, 'darks', metadata['gain'], exp_str, filter_str, temp_folder)
         elif is_bias:
-            path_parts = [session_base, 'bias', metadata['gain']]
-            if filter_str:
-                path_parts.append(filter_str)
-            path_parts.append(temp_folder)
-            path = os.path.join(*path_parts)
+            path = os.path.join(session_base, 'bias', metadata['gain'], filter_str, temp_folder)
         elif is_flat:
-            path_parts = [session_base, 'flats', metadata['gain']]
-            if filter_str:
-                path_parts.append(filter_str)
-            path_parts.append(temp_folder)
-            path = os.path.join(*path_parts)
+            path = os.path.join(session_base, 'flats', metadata['gain'], filter_str, temp_folder)
         else:  # lights
             exp_str = format_exposure(metadata['exposure'])
-            path_parts = [session_base, metadata['target'], metadata['gain'], exp_str]
-            if filter_str:
-                path_parts.append(filter_str)
-            path_parts.append(temp_folder)
-            path = os.path.join(*path_parts)
+            path = os.path.join(session_base, metadata['target'], metadata['gain'], exp_str, filter_str, temp_folder)
     
     return path
 
@@ -331,14 +315,29 @@ def generate_filename(original_filepath, metadata, rename_files):
     ext = os.path.splitext(original_filepath)[1]
     
     if rename_files:
-        # Generate standardized name: frametype_target_filter_exposure_gain_temp
+        frame_type = metadata['frame_type']
+        timestamp = metadata['timestamp']
+        filter_str = metadata['filter']  # Always present now (either actual filter or 'nofilter')
+        gain = metadata['gain']
         exp_str = format_exposure(metadata['exposure'])
-        filter_str = metadata.get('filter', None)
+        temp = metadata['temp']
         
-        if filter_str:
-            base_name = f"{metadata['frame_type']}_{metadata['target']}_{filter_str}_{exp_str}_{metadata['gain']}_{metadata['temp']}"
+        # Determine if this is a calibration frame
+        is_dark = 'dark' in frame_type
+        is_bias = 'bias' in frame_type
+        is_flat = 'flat' in frame_type
+        
+        if is_bias or is_flat:
+            # Bias/Flats: frametype_timestamp_filter_gain_temp (exposure irrelevant)
+            base_name = f"{frame_type}_{timestamp}_{filter_str}_{gain}_{temp}"
+        elif is_dark:
+            # Darks: frametype_timestamp_filter_gain_exposure_temp (no target)
+            base_name = f"{frame_type}_{timestamp}_{filter_str}_{gain}_{exp_str}_{temp}"
         else:
-            base_name = f"{metadata['frame_type']}_{metadata['target']}_{exp_str}_{metadata['gain']}_{metadata['temp']}"
+            # Lights: frametype_timestamp_target_filter_gain_exposure_temp
+            target = metadata['target']
+            base_name = f"{frame_type}_{timestamp}_{target}_{filter_str}_{gain}_{exp_str}_{temp}"
+        
         base_name = sanitize_name(base_name)
     else:
         # Use original name (sanitized to lowercase)
@@ -409,7 +408,8 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
                 group_key = ('calibration', frame_type, metadata['gain'], None)
         else:
             # Session groups: session_date, target, frame_type, gain, exposure, filter
-            filter_str = metadata.get('filter', None)
+            # Filter is always present now (either actual filter or 'nofilter')
+            filter_str = metadata['filter']
             group_key = (metadata['session_date'], metadata['target'], frame_type, 
                         metadata['gain'], metadata['exposure'], filter_str)
         
@@ -459,6 +459,17 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
     
     processed = 0
     skipped = 0
+    errors = 0
+    warnings = 0
+    start_time = datetime.now()
+    
+    # Calculate progress interval (1% of total files, minimum 1)
+    total_files = len(file_metadata)
+    progress_interval = max(1, total_files // 100)
+    
+    # Flag to show early progress for large datasets
+    show_early_progress = total_files > 1000
+    early_progress_shown = False
     
     # Open TSV file for writing
     with open(tsv_path, 'w') as tsv_file:
@@ -468,7 +479,7 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
         sequence_number = 0
         
         # Process files that had valid metadata
-        for item in file_metadata:
+        for i, item in enumerate(file_metadata, 1):
             sequence_number += 1
             filepath = item['filepath']
             metadata = item['metadata']
@@ -488,7 +499,7 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
             frame_type = metadata['frame_type']
             # Target only for light frames
             target = metadata['target'] if 'light' in frame_type else ''
-            filter_str = metadata.get('filter', '')
+            filter_str = metadata['filter']  # Always present now
             exposure = metadata['exposure']
             gain = metadata['gain']
             
@@ -503,54 +514,84 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
             
             # Check if file already exists
             if os.path.exists(output_path):
-                print(f"→ {os.path.basename(filepath)} - already exists, skipping")
                 # Log the skip with destination and metadata
                 tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_exists\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
                 skipped += 1
+                warnings += 1
                 continue
             
             # Copy file
             try:
                 shutil.copy2(filepath, output_path)
                 
-                # Format display
-                exp_display = format_exposure(metadata['exposure'])
-                if temp_raw is not None:
-                    temp_display = f'{temp_raw:.1f}°C'
-                else:
-                    temp_display = 'unknown'
-                
-                filter_display = f" | {filter_str}" if filter_str else ""
-                print(f"✓ {os.path.basename(filepath)} -> {metadata['frame_type'].title()} | {exp_display} | {metadata['gain']}{filter_display} | {temp_display} | {temp_folder}")
-                
                 # Log successful copy with metadata
                 tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tcopied\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
                 processed += 1
                 
             except Exception as e:
-                print(f"✗ Error copying {os.path.basename(filepath)}: {e}")
-                # Log the error with metadata
+                # Log the error with metadata (suppress console output)
                 tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_error\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
                 skipped += 1
+                errors += 1
+            
+            # Show early progress after 10 files for large datasets
+            if show_early_progress and i == 10 and not early_progress_shown:
+                timestamp = datetime.now().strftime('%H:%M:%S')
+                elapsed = (datetime.now() - start_time).total_seconds()
+                avg_time_per_file = elapsed / i
+                remaining_files = total_files - i
+                eta_seconds = avg_time_per_file * remaining_files
+                eta_time = datetime.now() + timedelta(seconds=eta_seconds)
+                eta_str = eta_time.strftime('%Y/%m/%d %H:%M')
+                percent_complete = (i / total_files) * 100
+                print(f"[{timestamp}] {percent_complete:5.1f}% - Processed {i}/{total_files} files "
+                      f"({processed} copied, {skipped} skipped) - ETA: {eta_str}")
+                early_progress_shown = True
+            
+            # Show progress after processing at 1% intervals or last file
+            if i % progress_interval == 0 or i == total_files:
+                timestamp = datetime.now().strftime('%H:%M:%S')
+                elapsed = (datetime.now() - start_time).total_seconds()
+                
+                # Calculate ETA
+                if i > 0:
+                    avg_time_per_file = elapsed / i
+                    remaining_files = total_files - i
+                    eta_seconds = avg_time_per_file * remaining_files
+                    eta_time = datetime.now() + timedelta(seconds=eta_seconds)
+                    eta_str = eta_time.strftime('%Y/%m/%d %H:%M')
+                else:
+                    eta_str = "calculating..."
+                
+                percent_complete = (i / total_files) * 100
+                print(f"[{timestamp}] {percent_complete:5.1f}% - Processed {i}/{total_files} files "
+                      f"({processed} copied, {skipped} skipped) - ETA: {eta_str}")
         
         # Process files that couldn't be read
         skipped_files = set(fits_files) - {item['filepath'] for item in file_metadata}
         for filepath in skipped_files:
             sequence_number += 1
-            print(f"✗ Skipped {os.path.basename(filepath)} - couldn't read metadata")
+            # Suppress console output - count as error
             tsv_file.write(f'{sequence_number}\t{filepath}\t\tskipped_unreadable\t\t\t\t\t\t\t\t\n')
             skipped += 1
+            errors += 1
     
     # Summary
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    print(f"Processed : {processed} files")
-    if skipped > 0:
-        print(f"Skipped   : {skipped} files")
+    print(f"Total files found:     {len(fits_files)}")
+    print(f"Successfully copied:   {processed} files")
+    if warnings > 0:
+        print(f"Warnings (skipped):    {warnings} files (already exist)")
+    if errors > 0:
+        print(f"Errors (failed):       {errors} files (unreadable or copy failed)")
+    print(f"Total in destination:  {processed} files")
     print("=" * 60)
     print(f"Output location: {output_folder}")
     print(f"Log file: {tsv_path}")
+    if errors > 0 or warnings > 0:
+        print(f"\nNote: Check {tsv_filename} for details on skipped files")
     print("\nDone!")
 
 def main_interactive():
@@ -586,8 +627,11 @@ def main_interactive():
         print()
         
         print("Rename files to standardized format?")
-        print("  Yes: Files renamed to frametype_target_filter_exposure_gain_temp_timestamp_ms.fit")
-        print("  No:  Keep original names (lowercase) with _timestamp_ms.fit suffix")
+        print("  Yes: Files renamed with relevant metadata for each type:")
+        print("       Lights: frametype_timestamp_target_filter_gain_exposure_temp.fit")
+        print("       Darks:  frametype_timestamp_filter_gain_exposure_temp.fit")
+        print("       Bias/Flats: frametype_timestamp_filter_gain_temp.fit")
+        print("  No:  Keep original names (lowercase) with _timestamp.fit suffix")
         rename = input("Rename files? [Y/n]: ").strip().lower()
         rename_files = rename != 'n'
         print()

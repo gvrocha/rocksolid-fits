@@ -8,10 +8,10 @@ source fits_env/bin/activate
 # Check if arguments were provided
 if [ $# -eq 0 ]; then
     # No arguments - run in interactive mode
-    python fits_organizer_v6.py
+    python fits_organizer.py
 else
     # Arguments provided - run in CLI mode
-    python fits_organizer_v6.py "$@"
+    python fits_organizer.py "$@"
 fi
 
 # Deactivate when done
