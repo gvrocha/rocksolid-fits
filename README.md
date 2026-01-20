@@ -23,7 +23,6 @@ organized/
 │   │           └── <temp_rounded>/
 │   └── bias/
 │       └── <gain>/
-│           └── <temp_rounded>/
 └── sessions/
     └── <date>/
         ├── <target>/
@@ -34,7 +33,6 @@ organized/
         ├── flats/
         │   └── <gain>/
         │       └── <filter?>/
-        │           └── <temp_range>/
         ├── darks/ (if not using calibration library)
         └── bias/ (if not using calibration library)
 ```
@@ -43,7 +41,8 @@ organized/
 
 - **Gain before exposure**: Facilitates matching light frames with flats (which require gain-matching, not exposure-matching)
 - **Temperature ranges**: Session frames use floor/ceil ranges (e.g., `minus21c_to_minus18c`). Frames beyond 4°C tolerance are placed in `above_<temp>/` or `below_<temp>/` subfolders
-- **Calibration library**: Darks and bias use individual rounded temperature folders for maximum reusability across sessions
+- **Calibration library**: Darks use individual rounded temperature folders for maximum reusability. Bias frames omit temperature (read noise is temperature-independent)
+- **Flats without temperature**: Flat frames don't include temperature folders since sensor response to uniform illumination is temperature-independent
 
 ### Multiple Cameras
 
@@ -126,14 +125,17 @@ chmod +x run_fits_organizer.sh
 
 Files are copied (not moved) to the organized structure with timestamp suffixes to prevent collisions:
 ```
-light_m31_20250114_153045_234.fit
+light_20250114_153045_234.fit
 bias_20250114_153046_456.fit
-flat_ha_20250114_153047_789.fit
+flat_20250114_153047_789.fit
 ```
 
-When using `--rename`, filenames include full metadata:
+When using `--rename`, filenames include relevant metadata for each frame type:
 ```
-light_m31_ha_180s_gain120_minus20c_20250114_153045_234.fit
+light_20250114_153045_234_m31_ha_gain120_180s_minus20c.fit
+dark_20250114_153046_456_gain120_180s_minus20c.fit
+flat_20250114_153047_789_ha_gain120.fit
+bias_20250114_153048_012_gain120.fit
 ```
 
 ### TSV Log

@@ -122,7 +122,7 @@ def fits_to_jpeg(fits_path, output_path, max_width=1920, low_pct=0.1, high_pct=9
 
 
 def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920, 
-                               low_pct=0.1, high_pct=99.9):
+                               low_pct=0.1, high_pct=99.9, include_calibration=False):
     """Generate JPEG previews from files listed in organizer log"""
     
     print("=" * 60)
@@ -140,28 +140,42 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
     
     print(f"Log contains {len(log_df)} entries")
     
-    # Filter for successfully copied light frames only
-    light_df = log_df[
-        (log_df['action'] == 'copied') & 
-        (log_df['frame_type'].str.contains('light', case=False, na=False))
-    ].copy()
+    # Filter for successfully copied frames
+    if include_calibration:
+        # Include all frame types
+        frames_df = log_df[log_df['action'] == 'copied'].copy()
+        print(f"Processing all frame types (lights + calibration)")
+    else:
+        # Light frames only
+        frames_df = log_df[
+            (log_df['action'] == 'copied') & 
+            (log_df['frame_type'].str.contains('light', case=False, na=False))
+        ].copy()
+        print(f"Processing light frames only (use --include-calibration for all frames)")
     
-    if len(light_df) == 0:
-        print("No successfully copied light frames found in log")
+    if len(frames_df) == 0:
+        if include_calibration:
+            print("No successfully copied frames found in log")
+        else:
+            print("No successfully copied light frames found in log")
         return
     
-    print(f"Found {len(light_df)} light frames to process\n")
+    print(f"Found {len(frames_df)} frames to process\n")
     
     # Generate output log filename
     timestamp_now = datetime.now()
     milliseconds = timestamp_now.microsecond // 1000
     tsv_timestamp = f"{timestamp_now.strftime('%Y%m%d_%H%M%S')}_{milliseconds:03d}"
-    preview_log_file = f'preview_log_{tsv_timestamp}.tsv'
+    preview_log_filename = f'preview_log_{tsv_timestamp}.tsv'
+    
+    # Place output log in same directory as input log file
+    log_dir = os.path.dirname(os.path.abspath(log_file))
+    preview_log_file = os.path.join(log_dir, preview_log_filename)
     
     # Determine review base directory
     if review_base_dir is None:
         # Use parent of first destination file
-        first_dest = Path(light_df.iloc[0]['destination_file'])
+        first_dest = Path(frames_df.iloc[0]['destination_file'])
         # Go up to find organized root (look for 'sessions' or 'calibration')
         review_base_dir = first_dest
         while review_base_dir.parent != review_base_dir:
@@ -185,10 +199,10 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
     start_time = datetime.now()
     
     # Calculate progress interval (1% of total files, minimum 1)
-    progress_interval = max(1, len(light_df) // 100)
+    progress_interval = max(1, len(frames_df) // 100)
     
     # Flag to show early progress for large datasets
-    show_early_progress = len(light_df) > 1000
+    show_early_progress = len(frames_df) > 1000
     early_progress_shown = False
     
     # Check for existing JPEGs to skip
@@ -205,7 +219,7 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
         # Write log header with new column order
         log_f.write('status\ttarget\tgain\texposure_sec\tcapture_time\ttemperature_c\tfits_file\tjpeg_file\tjpeg_collection_file\n')
         
-        for i, (idx, row) in enumerate(light_df.iterrows(), 1):
+        for i, (idx, row) in enumerate(frames_df.iterrows(), 1):
             fits_path = Path(row['destination_file'])
             target = row.get('target', 'unknown')
             gain = row.get('gain', 'unknown')
@@ -252,25 +266,25 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 timestamp = datetime.now().strftime('%H:%M:%S')
                 elapsed = (datetime.now() - start_time).total_seconds()
                 avg_time_per_file = elapsed / i
-                remaining_files = len(light_df) - i
+                remaining_files = len(frames_df) - i
                 eta_seconds = avg_time_per_file * remaining_files
                 from datetime import timedelta
                 eta_time = datetime.now() + timedelta(seconds=eta_seconds)
                 eta_str = eta_time.strftime('%Y/%m/%d %H:%M')
-                percent_complete = (i / len(light_df)) * 100
-                print(f"[{timestamp}] {percent_complete:5.1f}% - Processed {i}/{len(light_df)} files "
+                percent_complete = (i / len(frames_df)) * 100
+                print(f"[{timestamp}] {percent_complete:5.1f}% - Processed {i}/{len(frames_df)} files "
                       f"({successful} successful, {failed} failed) - ETA: {eta_str}")
                 early_progress_shown = True
             
             # Show progress after processing at 1% intervals or last file
-            if i % progress_interval == 0 or i == len(light_df):
+            if i % progress_interval == 0 or i == len(frames_df):
                 timestamp = datetime.now().strftime('%H:%M:%S')
                 elapsed = (datetime.now() - start_time).total_seconds()
                 
                 # Calculate ETA
                 if i > 0:
                     avg_time_per_file = elapsed / i
-                    remaining_files = len(light_df) - i
+                    remaining_files = len(frames_df) - i
                     eta_seconds = avg_time_per_file * remaining_files
                     from datetime import timedelta
                     eta_time = datetime.now() + timedelta(seconds=eta_seconds)
@@ -278,8 +292,8 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 else:
                     eta_str = "calculating..."
                 
-                percent_complete = (i / len(light_df)) * 100
-                print(f"[{timestamp}] {percent_complete:5.1f}% - Processed {i}/{len(light_df)} files "
+                percent_complete = (i / len(frames_df)) * 100
+                print(f"[{timestamp}] {percent_complete:5.1f}% - Processed {i}/{len(frames_df)} files "
                       f"({successful} successful, {failed} failed) - ETA: {eta_str}")
     
     print("\n" + "=" * 60)
@@ -349,14 +363,14 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 f.write('\t'.join(parts) + '\n')
         
         # Copy the preview log to the collection directory
-        collection_log_path = collection_dir / preview_log_file
+        collection_log_path = collection_dir / preview_log_filename
         shutil.copy2(preview_log_file, collection_log_path)
         print(f"Copied preview log to collection: {collection_log_path}")
         
         # Create Excel version with separate tabs per target
         if OPENPYXL_AVAILABLE:
             print("Creating Excel workbook with tabs per target...")
-            excel_filename = preview_log_file.replace('.tsv', '.xlsx')
+            excel_filename = preview_log_filename.replace('.tsv', '.xlsx')
             excel_path = collection_dir / excel_filename
             
             try:
@@ -420,10 +434,11 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
     print(f"Local JPEGs: Next to FITS files in 'jpegs' subdirectories")
     print(f"Collection:  {collection_dir}")
     if preview_records:
-        print(f"TSV log:     {collection_dir / preview_log_file}")
+        print(f"TSV log:     {collection_dir / preview_log_filename}")
         if OPENPYXL_AVAILABLE:
-            excel_filename = preview_log_file.replace('.tsv', '.xlsx')
+            excel_filename = preview_log_filename.replace('.tsv', '.xlsx')
             print(f"Excel log:   {collection_dir / excel_filename} (tabs per target)")
+        print(f"TSV log (original location): {preview_log_file}")
     else:
         print(f"Log file:    {preview_log_file}")
     print("=" * 60)
@@ -434,7 +449,10 @@ def main():
         description='FITS Quick Review Generator - Generate previews from organizer log',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
-Generates grayscale JPEG previews from light frames listed in fits_organizer log.
+Generates grayscale JPEG previews from frames listed in fits_organizer log.
+
+By default, only light frames are processed. Use --include-calibration to also 
+process calibration frames (darks, flats, bias).
 
 Creates JPEGs in two locations:
   1. Local: In 'jpegs' subfolder next to each FITS file
@@ -448,8 +466,11 @@ Skips JPEGs that already exist in the collection to avoid duplicate work.
 Designed to run after fits_organizer as part of import pipeline.
 
 Examples:
-  # Generate from organizer log
+  # Generate from organizer log (lights only)
   %(prog)s organize_log_20250117_143052_234.tsv
+  
+  # Include calibration frames
+  %(prog)s organize_log_20250117_143052_234.tsv --include-calibration
   
   # Custom review base directory
   %(prog)s organize_log_20250117_143052_234.tsv --review-dir /path/to/review
@@ -470,6 +491,8 @@ Requirements:
     
     parser.add_argument('log_file', help='TSV log file from fits_organizer')
     parser.add_argument('--review-dir', help='Base directory for review collection (default: auto-detect)')
+    parser.add_argument('--include-calibration', action='store_true',
+                       help='Include calibration frames (darks, flats, bias) in addition to lights (default: lights only)')
     parser.add_argument('--width', '-w', type=int, default=1920,
                        help='Maximum width in pixels (default: 1920)')
     parser.add_argument('--low', type=float, default=0.1,
@@ -491,7 +514,7 @@ Requirements:
     
     # Generate previews
     generate_previews_from_log(args.log_file, args.review_dir, args.width, 
-                               args.low, args.high)
+                               args.low, args.high, args.include_calibration)
 
 
 if __name__ == '__main__':

@@ -248,12 +248,12 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
     
     Calibration Library (darks/bias):
       calibration/darks/<gain>/<exposure>/<temp>/
-      calibration/bias/<gain>/<temp>/
+      calibration/bias/<gain>/
     
     Session structure (lights/flats, or darks/bias if CalibLib=No):
       sessions/<date>/darks/<gain>/<exposure>/<filter?>/<temp_range>/
-      sessions/<date>/bias/<gain>/<filter?>/<temp_range>/
-      sessions/<date>/flats/<gain>/<filter?>/<temp_range>/
+      sessions/<date>/bias/<gain>/<filter?>/
+      sessions/<date>/flats/<gain>/<filter?>/
       sessions/<date>/<target>/<gain>/<exposure>/<filter?>/<temp_range>/
     
     Filter is optional - only added if present in metadata
@@ -279,13 +279,12 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
                 exp_str,
                 temp_folder
             )
-        else:  # bias
+        else:  # bias - no temperature folder
             path = os.path.join(
                 output_base,
                 'calibration',
                 'bias',
-                metadata['gain'],
-                temp_folder
+                metadata['gain']
             )
     else:
         # Session-based structure - always include filter
@@ -299,9 +298,11 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
             exp_str = format_exposure(metadata['exposure'])
             path = os.path.join(session_base, 'darks', metadata['gain'], exp_str, filter_str, temp_folder)
         elif is_bias:
-            path = os.path.join(session_base, 'bias', metadata['gain'], filter_str, temp_folder)
+            # Bias: no temperature folder
+            path = os.path.join(session_base, 'bias', metadata['gain'], filter_str)
         elif is_flat:
-            path = os.path.join(session_base, 'flats', metadata['gain'], filter_str, temp_folder)
+            # Flats: no temperature folder
+            path = os.path.join(session_base, 'flats', metadata['gain'], filter_str)
         else:  # lights
             exp_str = format_exposure(metadata['exposure'])
             path = os.path.join(session_base, metadata['target'], metadata['gain'], exp_str, filter_str, temp_folder)
@@ -327,24 +328,26 @@ def generate_filename(original_filepath, metadata, rename_files):
         is_bias = 'bias' in frame_type
         is_flat = 'flat' in frame_type
         
-        if is_bias or is_flat:
-            # Bias/Flats: frametype_timestamp_filter_gain_temp (exposure irrelevant)
-            base_name = f"{frame_type}_{timestamp}_{filter_str}_{gain}_{temp}"
+        if is_bias:
+            # Bias: frametype_timestamp_gain (no filter, no temp, no exposure)
+            base_name = f"{frame_type}_{timestamp}_{gain}"
+        elif is_flat:
+            # Flats: frametype_timestamp_filter_gain (no temp, exposure irrelevant)
+            base_name = f"{frame_type}_{timestamp}_{filter_str}_{gain}"
         elif is_dark:
-            # Darks: frametype_timestamp_filter_gain_exposure_temp (no target)
-            base_name = f"{frame_type}_{timestamp}_{filter_str}_{gain}_{exp_str}_{temp}"
+            # Darks: frametype_timestamp_gain_exposure_temp (no filter, no target)
+            base_name = f"{frame_type}_{timestamp}_{gain}_{exp_str}_{temp}"
         else:
             # Lights: frametype_timestamp_target_filter_gain_exposure_temp
             target = metadata['target']
             base_name = f"{frame_type}_{timestamp}_{target}_{filter_str}_{gain}_{exp_str}_{temp}"
         
         base_name = sanitize_name(base_name)
+        filename = f"{base_name}{ext}"
     else:
-        # Use original name (sanitized to lowercase)
+        # Use original name (sanitized to lowercase) with timestamp suffix
         base_name = sanitize_name(name_without_ext)
-    
-    # Add timestamp suffix with milliseconds: _YYYYMMDD_HHMMSS_mmm
-    filename = f"{base_name}_{metadata['timestamp']}{ext}"
+        filename = f"{base_name}_{metadata['timestamp']}{ext}"
     
     return filename
 
@@ -629,8 +632,9 @@ def main_interactive():
         print("Rename files to standardized format?")
         print("  Yes: Files renamed with relevant metadata for each type:")
         print("       Lights: frametype_timestamp_target_filter_gain_exposure_temp.fit")
-        print("       Darks:  frametype_timestamp_filter_gain_exposure_temp.fit")
-        print("       Bias/Flats: frametype_timestamp_filter_gain_temp.fit")
+        print("       Darks:  frametype_timestamp_gain_exposure_temp.fit")
+        print("       Flats:  frametype_timestamp_filter_gain.fit")
+        print("       Bias:   frametype_timestamp_gain.fit")
         print("  No:  Keep original names (lowercase) with _timestamp.fit suffix")
         rename = input("Rename files? [Y/n]: ").strip().lower()
         rename_files = rename != 'n'
