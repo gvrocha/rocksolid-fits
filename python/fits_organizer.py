@@ -54,8 +54,15 @@ def extract_timestamp(filepath, header=None):
         milliseconds = dt.microsecond // 1000
         return f"{dt.strftime('%Y%m%d_%H%M%S')}_{milliseconds:03d}"
 
-def extract_metadata(filepath):
-    """Extract metadata from FITS file"""
+def extract_metadata(filepath, tz_offset_hours=None):
+    """
+    Extract metadata from FITS file
+    
+    Args:
+        filepath: Path to FITS file
+        tz_offset_hours: Optional timezone offset in hours from UTC (e.g., -5 for EST, -6 for CST).
+                        If None, will attempt to calculate from SITELON header, else assume UTC.
+    """
     if not ASTROPY_AVAILABLE:
         return None
     
@@ -110,9 +117,37 @@ def extract_metadata(filepath):
             date_obs = header.get('DATE-OBS', header.get('DATE', None))
             if date_obs:
                 try:
+                    # DATE-OBS is in UTC, need to convert to local time for session grouping
                     date_obj = datetime.fromisoformat(date_obs.replace('Z', '+00:00'))
                     
-                    # Midnight adjustment: if before noon, use previous day's session
+                    # Determine timezone offset
+                    calculated_tz_offset = None
+                    
+                    if tz_offset_hours is not None:
+                        # Use provided timezone offset (preferred method)
+                        calculated_tz_offset = tz_offset_hours
+                    else:
+                        # FALLBACK: Try to get longitude for astronomical timezone calculation
+                        # NOTE: ASIAIR does not write SITELON/SITELONG to FITS headers,
+                        # so this fallback is unlikely to work with ASIAIR files.
+                        # Kept for compatibility with other software that may include location data.
+                        site_lon = header.get('SITELON', header.get('SITELONG', header.get('LONG-OBS', None)))
+                        
+                        if site_lon is not None:
+                            try:
+                                lon = float(site_lon)
+                                # Calculate timezone offset: floor(longitude/15)
+                                # Positive longitude = East (ahead of UTC), negative = West (behind UTC)
+                                calculated_tz_offset = math.floor(lon / 15.0)
+                            except (ValueError, TypeError):
+                                # If longitude is invalid, assume UTC (no conversion)
+                                pass
+                    
+                    # Apply timezone offset if available
+                    if calculated_tz_offset is not None:
+                        date_obj = date_obj + timedelta(hours=calculated_tz_offset)
+                    
+                    # Midnight adjustment: if before noon local time, use previous day's session
                     if date_obj.hour < 12:
                         date_obj = date_obj - timedelta(days=1)
                     
@@ -351,8 +386,18 @@ def generate_filename(original_filepath, metadata, rename_files):
     
     return filename
 
-def organize_fits_files(input_folder, output_folder, use_calibration_library=True, rename_files=False):
-    """Organize FITS files from input_folder into output_folder structure"""
+def organize_fits_files(input_folder, output_folder, use_calibration_library=True, rename_files=False, tz_offset_hours=None):
+    """
+    Organize FITS files from input_folder into output_folder structure
+    
+    Args:
+        input_folder: Source directory containing FITS files
+        output_folder: Destination directory for organized files
+        use_calibration_library: Create reusable calibration library structure
+        rename_files: Rename files with metadata
+        tz_offset_hours: Timezone offset from UTC (e.g., -5 for EST, -6 for CST).
+                        If None, will try to extract from FITS headers or assume UTC.
+    """
     if not ASTROPY_AVAILABLE:
         print("Cannot proceed without astropy. Please install it.")
         return
@@ -377,7 +422,7 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
         if i % 50 == 0:
             print(f"  Reading file {i}/{len(fits_files)}...")
         
-        metadata = extract_metadata(filepath)
+        metadata = extract_metadata(filepath, tz_offset_hours)
         if metadata is not None:
             file_metadata.append({
                 'filepath': filepath,
@@ -640,9 +685,24 @@ def main_interactive():
         rename_files = rename != 'n'
         print()
         
+        print("Timezone offset from UTC for session grouping:")
+        print("  (e.g., -5 for US Eastern, -6 for Central, -7 for Mountain, -8 for Pacific)")
+        print("  Leave empty to use UTC (no conversion)")
+        tz_input = input("UTC offset in hours [blank for UTC]: ").strip()
+        tz_offset = None
+        if tz_input:
+            try:
+                tz_offset = float(tz_input)
+                print(f"Using UTC{tz_offset:+.0f} for session grouping")
+            except ValueError:
+                print("Invalid offset, using UTC")
+        else:
+            print("Using UTC for session grouping")
+        print()
+        
         print("Starting organization...\n")
         
-        organize_fits_files(input_folder, output_folder, use_calibration_library, rename_files)
+        organize_fits_files(input_folder, output_folder, use_calibration_library, rename_files, tz_offset)
         
     except KeyboardInterrupt:
         print("\n\nOperation cancelled by user")
@@ -660,6 +720,17 @@ def main_cli():
 Organizes astrophotography FITS files into a structured hierarchy based on 
 metadata extracted from file headers. Designed for deep-sky imaging workflows 
 with temperature-controlled cameras.
+
+Session Grouping and Timezones:
+  ASIAIR writes DATE-OBS in UTC/GMT. For proper session grouping (noon-to-noon),
+  use --tz-offset to specify your local timezone. For example:
+    US Eastern:   --tz-offset -5  (EST, no DST)
+    US Central:   --tz-offset -6  (CST, no DST)
+    US Mountain:  --tz-offset -7  (MST, no DST)
+    US Pacific:   --tz-offset -8  (PST, no DST)
+  
+  Astronomical timezones: Use floor(longitude/15) to avoid DST complications.
+  For Fishers, IN (longitude -86.0°): floor(-86/15) = -6 hours (CST)
 
 Key Features:
   • Smart temperature grouping: Frames within 4°C grouped together, outliers 
@@ -688,18 +759,23 @@ Examples:
   Interactive mode:
     %(prog)s
   
-  CLI mode - basic organization:
-    %(prog)s /raw/data /organized/asi294mc_pro
+  CLI mode - basic organization (US Central timezone):
+    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6
   
   CLI mode - with file renaming:
-    %(prog)s /raw/data /organized/asi294mc_pro --rename
+    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --rename
   
-  CLI mode - session-only (no calibration library):
-    %(prog)s /raw/data /organized/asi294mc_pro --no-calib-library
+  CLI mode - session-only, no calibration library:
+    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --no-calib-library
+  
+  CLI mode - for Brazil imaging trip (São Paulo/Brasília):
+    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -3 --rename
 '''
     )
     parser.add_argument('input_folder', help='Input folder path (where FITS files are)')
     parser.add_argument('output_folder', help='Output folder path (where to organize files)')
+    parser.add_argument('--tz-offset', type=float, required=True,
+                       help='Timezone offset from UTC in hours for session grouping (e.g., -6 for US Central). REQUIRED.')
     parser.add_argument('--no-calib-library', action='store_true',
                        help='Do not use calibration library structure (default: use calibration library)')
     parser.add_argument('--rename', action='store_true',
@@ -724,13 +800,15 @@ Examples:
     print(f"Output: {args.output_folder}")
     print(f"Calibration Library: {not args.no_calib_library}")
     print(f"Rename Files: {args.rename}")
+    print(f"Timezone Offset: UTC{args.tz_offset:+.0f}")
     print()
     
     organize_fits_files(
         args.input_folder,
         args.output_folder,
         use_calibration_library=not args.no_calib_library,
-        rename_files=args.rename
+        rename_files=args.rename,
+        tz_offset_hours=args.tz_offset
     )
 
 if __name__ == '__main__':

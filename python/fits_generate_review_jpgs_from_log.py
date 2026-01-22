@@ -217,7 +217,7 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
     
     with open(preview_log_file, 'w') as log_f:
         # Write log header with new column order
-        log_f.write('status\ttarget\tgain\texposure_sec\tcapture_time\ttemperature_c\tfits_file\tjpeg_file\tjpeg_collection_file\n')
+        log_f.write('status\ttarget\tgain\texposure_sec\tcapture_time\ttemperature_c\tfits_file\tjpeg_file\tjpeg_collection_file\tprocessing_status\n')
         
         for i, (idx, row) in enumerate(frames_df.iterrows(), 1):
             fits_path = Path(row['destination_file'])
@@ -231,35 +231,68 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
             jpeg_dir = fits_path.parent / 'jpegs'
             jpeg_path = jpeg_dir / f"{fits_path.stem}.jpg"
             
-            # Check if JPEG already exists in collection (skip if so)
-            if jpeg_path.name in existing_jpegs:
-                # Skip this file - already processed
-                continue
+            # Resolve symlinks to real paths for web access
+            fits_real_path = os.path.realpath(fits_path)
+            jpeg_real_path = os.path.realpath(jpeg_path)
             
-            # Convert to JPEG
-            success = fits_to_jpeg(fits_path, jpeg_path, max_width, low_pct, high_pct)
-            
-            if success:
+            # Check if JPEG already exists
+            if jpeg_path.exists():
+                # JPEG already exists - record it with 'existing' processing status
+                processing_status = 'existing'
+                review_status = 'unverified'
                 successful += 1
                 
                 # Store record for collection
                 preview_records.append({
-                    'status': 'unreviewed',
+                    'status': review_status,
                     'target': target,
                     'gain': gain,
                     'exposure_sec': exposure,
                     'capture_time': timestamp_str,
                     'temperature_c': temperature,
-                    'fits_file': str(fits_path),
-                    'jpeg_file': str(jpeg_path),
-                    'jpeg_path': jpeg_path
+                    'fits_file': fits_real_path,
+                    'jpeg_file': jpeg_real_path,
+                    'jpeg_path': jpeg_path,
+                    'processing_status': processing_status
                 })
                 
-                # Write to log with new column order (collection path will be added later)
-                log_f.write(f'unreviewed\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_path}\t{jpeg_path}\t\n')
+                # Write to log
+                log_f.write(f'{review_status}\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_real_path}\t{jpeg_real_path}\t\t{processing_status}\n')
                 log_f.flush()
             else:
-                failed += 1
+                # Convert to JPEG
+                success = fits_to_jpeg(fits_path, jpeg_path, max_width, low_pct, high_pct)
+                
+                if success:
+                    successful += 1
+                    processing_status = 'generated'
+                    review_status = 'unverified'
+                    
+                    # Store record for collection
+                    preview_records.append({
+                        'status': review_status,
+                        'target': target,
+                        'gain': gain,
+                        'exposure_sec': exposure,
+                        'capture_time': timestamp_str,
+                        'temperature_c': temperature,
+                        'fits_file': fits_real_path,
+                        'jpeg_file': jpeg_real_path,
+                        'jpeg_path': jpeg_path,
+                        'processing_status': processing_status
+                    })
+                    
+                    # Write to log
+                    log_f.write(f'{review_status}\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_real_path}\t{jpeg_real_path}\t\t{processing_status}\n')
+                    log_f.flush()
+                else:
+                    failed += 1
+                    processing_status = 'failed'
+                    review_status = 'discarded'
+                    
+                    # Still record failed conversions
+                    log_f.write(f'{review_status}\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_real_path}\t\t\t{processing_status}\n')
+                    log_f.flush()
             
             # Show early progress after 10 files for large datasets
             if show_early_progress and i == 10 and not early_progress_shown:
@@ -338,7 +371,9 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 # Keep original filename (which includes timestamp for sorting)
                 dst_jpeg = folder / src_jpeg.name
                 shutil.copy2(src_jpeg, dst_jpeg)
-                collection_mapping[str(record['jpeg_file'])] = str(dst_jpeg)
+                # Resolve symlink for collection path
+                dst_jpeg_real = os.path.realpath(dst_jpeg)
+                collection_mapping[record['jpeg_file']] = dst_jpeg_real
         
         # Update log file with collection paths
         print("Updating preview log with collection paths...")
@@ -355,10 +390,17 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 if len(parts) >= 8:
                     jpeg_file = parts[7]  # jpeg_file is column 8 (index 7)
                     collection_file = collection_mapping.get(jpeg_file, '')
-                    # Replace empty 9th column with collection path
-                    if len(parts) == 8:
-                        parts.append(collection_file)
-                    elif len(parts) == 9:
+                    # Update collection path column (index 8)
+                    if len(parts) == 9:
+                        # Has processing_status but no collection path yet
+                        parts[8] = collection_file
+                    elif len(parts) == 10:
+                        # Already has both columns
+                        parts[8] = collection_file
+                    else:
+                        # Shouldn't happen, but handle gracefully
+                        while len(parts) < 10:
+                            parts.append('')
                         parts[8] = collection_file
                 f.write('\t'.join(parts) + '\n')
         
