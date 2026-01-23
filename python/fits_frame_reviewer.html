@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FITS Frame Reviewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #2a2a2a;
+            padding: 15px 20px;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .load-section {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn {
+            background: #4a90e2;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .btn:hover {
+            background: #357abd;
+        }
+
+        .btn-success {
+            background: #5cb85c;
+        }
+
+        .btn-success:hover {
+            background: #449d44;
+        }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 300px;
+            background: #252525;
+            border-right: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .status-bar {
+            padding: 15px;
+            background: #2a2a2a;
+            border-bottom: 1px solid #444;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .badge-selected { background: #5cb85c; color: white; }
+        .badge-discarded { background: #d9534f; color: white; }
+        .badge-undecided { background: #f0ad4e; color: white; }
+        .badge-unverified { background: #777; color: white; }
+
+        .frame-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .frame-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .frame-item:hover {
+            background: #333;
+        }
+
+        .frame-item.active {
+            border-color: #4a90e2;
+            background: #333;
+        }
+
+        .frame-item.status-selected { border-left: 4px solid #5cb85c; }
+        .frame-item.status-discarded { border-left: 4px solid #d9534f; }
+        .frame-item.status-undecided { border-left: 4px solid #f0ad4e; }
+        .frame-item.status-unverified { border-left: 4px solid #777; }
+
+        .frame-target {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .frame-time {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .frame-details {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .viewer {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a1a;
+        }
+
+        .image-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            border-radius: 4px;
+        }
+
+        .no-image {
+            color: #666;
+            font-size: 18px;
+            text-align: center;
+        }
+
+        .controls {
+            padding: 20px;
+            background: #2a2a2a;
+            border-top: 1px solid #444;
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .control-btn {
+            padding: 15px 40px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-discard {
+            background: #d9534f;
+            color: white;
+        }
+
+        .btn-discard:hover {
+            background: #c9302c;
+            transform: scale(1.05);
+        }
+
+        .btn-undecided {
+            background: #f0ad4e;
+            color: white;
+        }
+
+        .btn-undecided:hover {
+            background: #ec971f;
+            transform: scale(1.05);
+        }
+
+        .btn-select {
+            background: #5cb85c;
+            color: white;
+        }
+
+        .btn-select:hover {
+            background: #449d44;
+            transform: scale(1.05);
+        }
+
+        .keyboard-hint {
+            font-size: 11px;
+            opacity: 0.7;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+
+        .empty-state h2 {
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .image-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>FITS Frame Reviewer</h1>
+        <div class="load-section">
+            <label for="file-input" class="btn">Load Preview Log</label>
+            <input type="file" id="file-input" accept=".tsv">
+            <button id="demo-btn" class="btn" style="background: #9b59b6;">Load Demo Data</button>
+            <button id="save-btn" class="btn btn-success" style="display: none;">Save Review TSV</button>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="status-bar">
+                <div class="status-item">
+                    <span>Selected:</span>
+                    <span class="status-badge badge-selected" id="count-selected">0</span>
+                </div>
+                <div class="status-item">
+                    <span>Discarded:</span>
+                    <span class="status-badge badge-discarded" id="count-discarded">0</span>
+                </div>
+                <div class="status-item">
+                    <span>Undecided:</span>
+                    <span class="status-badge badge-undecided" id="count-undecided">0</span>
+                </div>
+                <div class="status-item">
+                    <span>Unverified:</span>
+                    <span class="status-badge badge-unverified" id="count-unverified">0</span>
+                </div>
+            </div>
+            <div class="frame-list" id="frame-list">
+                <div class="empty-state">
+                    <h2>No frames loaded</h2>
+                    <p>Load a preview log file to begin</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="viewer">
+            <div class="image-container" id="image-container">
+                <div class="no-image">Select a frame to review</div>
+            </div>
+            <div class="controls" id="controls" style="display: none;">
+                <button class="control-btn btn-discard" id="btn-discard">
+                    👎 Discard
+                    <span class="keyboard-hint">(←)</span>
+                </button>
+                <button class="control-btn btn-undecided" id="btn-undecided">
+                    🤷 Undecided
+                    <span class="keyboard-hint">(↓)</span>
+                </button>
+                <button class="control-btn btn-select" id="btn-select">
+                    👍 Select
+                    <span class="keyboard-hint">(→)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let frames = [];
+        let currentIndex = -1;
+
+        // Demo mode - Load sample data
+        document.getElementById('demo-btn').addEventListener('click', () => {
+            loadDemoData();
+        });
+
+        function loadDemoData() {
+            // Create sample frames with placeholder images
+            frames = [
+                {
+                    status: 'success',
+                    target: 'M31',
+                    gain: 'gain120',
+                    exposure_sec: '180',
+                    capture_time: '20250119_213045_234',
+                    temperature_c: '-20.1',
+                    fits_file: 'light_20250119_213045_234_m31_ha_gain120_180s_minus20c.fit',
+                    jpeg_file: generatePlaceholderImage('M31 Andromeda Galaxy', '#1a3a5a'),
+                    jpeg_collection_file: '',
+                    review_status: 'unverified'
+                },
+                {
+                    status: 'success',
+                    target: 'M31',
+                    gain: 'gain120',
+                    exposure_sec: '180',
+                    capture_time: '20250119_213348_567',
+                    temperature_c: '-20.0',
+                    fits_file: 'light_20250119_213348_567_m31_ha_gain120_180s_minus20c.fit',
+                    jpeg_file: generatePlaceholderImage('M31 Andromeda Galaxy', '#1a4a6a'),
+                    jpeg_collection_file: '',
+                    review_status: 'unverified'
+                },
+                {
+                    status: 'success',
+                    target: 'M31',
+                    gain: 'gain120',
+                    exposure_sec: '180',
+                    capture_time: '20250119_213651_890',
+                    temperature_c: '-19.9',
+                    fits_file: 'light_20250119_213651_890_m31_ha_gain120_180s_minus20c.fit',
+                    jpeg_file: generatePlaceholderImage('M31 Andromeda Galaxy', '#2a3a5a', true),
+                    jpeg_collection_file: '',
+                    review_status: 'unverified'
+                }
+            ];
+
+            renderFrameList();
+            updateStatusCounts();
+            document.getElementById('save-btn').style.display = 'block';
+
+            // Auto-select first frame
+            if (frames.length > 0) {
+                selectFrame(0);
+            }
+        }
+
+        function generatePlaceholderImage(label, bgColor, addNoise = false) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 600;
+            const ctx = canvas.getContext('2d');
+
+            // Background gradient
+            const gradient = ctx.createRadialGradient(400, 300, 50, 400, 300, 400);
+            gradient.addColorStop(0, bgColor);
+            gradient.addColorStop(1, '#0a0a0a');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 800, 600);
+
+            // Add some "stars"
+            ctx.fillStyle = 'white';
+            for (let i = 0; i < 200; i++) {
+                const x = Math.random() * 800;
+                const y = Math.random() * 600;
+                const size = Math.random() * 2;
+                ctx.beginPath();
+                ctx.arc(x, y, size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Add some brighter stars
+            for (let i = 0; i < 20; i++) {
+                const x = Math.random() * 800;
+                const y = Math.random() * 600;
+                const size = Math.random() * 3 + 2;
+                const glow = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
+                glow.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(x, y, size * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Add central galaxy glow
+            const galaxyGlow = ctx.createRadialGradient(400, 300, 10, 400, 300, 150);
+            galaxyGlow.addColorStop(0, 'rgba(200, 200, 255, 0.3)');
+            galaxyGlow.addColorStop(0.5, 'rgba(150, 150, 200, 0.1)');
+            galaxyGlow.addColorStop(1, 'rgba(100, 100, 150, 0)');
+            ctx.fillStyle = galaxyGlow;
+            ctx.fillRect(200, 150, 400, 300);
+
+            // Optional: Add noise/artifacts for "bad" frame
+            if (addNoise) {
+                ctx.fillStyle = 'rgba(255, 100, 100, 0.1)';
+                ctx.fillRect(0, 0, 200, 600); // Gradient issue
+                
+                // Add satellite trail
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(100, 100);
+                ctx.lineTo(700, 500);
+                ctx.stroke();
+
+                // Label the issue
+                ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
+                ctx.font = 'bold 20px Arial';
+                ctx.fillText('SATELLITE TRAIL', 300, 50);
+            }
+
+            // Add label
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.font = '16px Arial';
+            ctx.fillText(label, 20, 580);
+
+            return canvas.toDataURL();
+        }
+
+        // Load TSV file
+        document.getElementById('file-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                parseTSV(event.target.result);
+            };
+            reader.readAsText(file);
+        });
+
+        function parseTSV(content) {
+            const lines = content.trim().split('\n');
+            const headers = lines[0].split('\t');
+
+            frames = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split('\t');
+                const frame = {};
+                headers.forEach((header, idx) => {
+                    frame[header] = values[idx] || '';
+                });
+                
+                // Initialize review_status from the status column
+                // Map from TSV status to review status
+                if (frame.status === 'unverified') {
+                    frame.review_status = 'unverified';
+                } else if (frame.status === 'discarded') {
+                    frame.review_status = 'discarded';
+                } else {
+                    // Default to unverified if not specified
+                    frame.review_status = 'unverified';
+                }
+                
+                frames.push(frame);
+            }
+
+            renderFrameList();
+            updateStatusCounts();
+            document.getElementById('save-btn').style.display = 'block';
+
+            // Auto-select first frame
+            if (frames.length > 0) {
+                selectFrame(0);
+            }
+        }
+
+        function renderFrameList() {
+            const container = document.getElementById('frame-list');
+            container.innerHTML = '';
+
+            frames.forEach((frame, index) => {
+                const div = document.createElement('div');
+                div.className = `frame-item status-${frame.review_status}`;
+                div.onclick = () => selectFrame(index);
+
+                const captureTime = frame.capture_time || '';
+                const displayTime = captureTime.replace('_', ' ').replace(/-/g, ':');
+
+                div.innerHTML = `
+                    <div class="frame-target">${frame.target || 'Unknown'}</div>
+                    <div class="frame-time">${displayTime}</div>
+                    <div class="frame-details">
+                        ${frame.exposure_sec}s · ${frame.gain} · ${frame.temperature_c}°C
+                    </div>
+                `;
+
+                container.appendChild(div);
+            });
+        }
+
+        function selectFrame(index) {
+            if (index < 0 || index >= frames.length) return;
+
+            currentIndex = index;
+
+            // Update active state in list
+            document.querySelectorAll('.frame-item').forEach((item, idx) => {
+                item.classList.toggle('active', idx === index);
+            });
+
+            // Display image
+            const frame = frames[index];
+            const imageContainer = document.getElementById('image-container');
+            
+            const jpegPath = frame.jpeg_collection_file || frame.jpeg_file;
+            if (jpegPath) {
+                imageContainer.innerHTML = `
+                    <div class="image-info">
+                        ${frame.target} · ${frame.exposure_sec}s · ${frame.gain}<br>
+                        ${frame.capture_time} · ${frame.temperature_c}°C
+                    </div>
+                    <img src="${jpegPath}" alt="Frame">
+                `;
+            } else {
+                imageContainer.innerHTML = '<div class="no-image">Image not found</div>';
+            }
+
+            // Show controls
+            document.getElementById('controls').style.display = 'flex';
+        }
+
+        function setStatus(status) {
+            if (currentIndex < 0) return;
+
+            frames[currentIndex].review_status = status;
+            
+            // Update the frame item styling
+            const frameItems = document.querySelectorAll('.frame-item');
+            frameItems[currentIndex].className = `frame-item status-${status} active`;
+
+            updateStatusCounts();
+
+            // Auto-advance to next unverified frame
+            advanceToNextUnverified();
+        }
+
+        function advanceToNextUnverified() {
+            // Find next unverified frame
+            for (let i = currentIndex + 1; i < frames.length; i++) {
+                if (frames[i].review_status === 'unverified') {
+                    selectFrame(i);
+                    return;
+                }
+            }
+
+            // If no unverified frames ahead, try from beginning
+            for (let i = 0; i < currentIndex; i++) {
+                if (frames[i].review_status === 'unverified') {
+                    selectFrame(i);
+                    return;
+                }
+            }
+
+            // All frames reviewed - just move to next
+            if (currentIndex < frames.length - 1) {
+                selectFrame(currentIndex + 1);
+            }
+        }
+
+        function updateStatusCounts() {
+            const counts = {
+                selected: 0,
+                discarded: 0,
+                undecided: 0,
+                unverified: 0
+            };
+
+            frames.forEach(frame => {
+                counts[frame.review_status]++;
+            });
+
+            document.getElementById('count-selected').textContent = counts.selected;
+            document.getElementById('count-discarded').textContent = counts.discarded;
+            document.getElementById('count-undecided').textContent = counts.undecided;
+            document.getElementById('count-unverified').textContent = counts.unverified;
+        }
+
+        // Button handlers
+        document.getElementById('btn-discard').addEventListener('click', () => setStatus('discarded'));
+        document.getElementById('btn-undecided').addEventListener('click', () => setStatus('undecided'));
+        document.getElementById('btn-select').addEventListener('click', () => setStatus('selected'));
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (currentIndex < 0) return;
+
+            switch(e.key) {
+                case 'ArrowLeft':
+                    setStatus('discarded');
+                    break;
+                case 'ArrowDown':
+                    setStatus('undecided');
+                    break;
+                case 'ArrowRight':
+                    setStatus('selected');
+                    break;
+                case 'ArrowUp':
+                    // Go to previous frame
+                    if (currentIndex > 0) selectFrame(currentIndex - 1);
+                    break;
+            }
+        });
+
+        // Save review results
+        document.getElementById('save-btn').addEventListener('click', () => {
+            const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0].replace('T', '_');
+            const filename = `frame_review_${timestamp}.tsv`;
+
+            // Create TSV content
+            const headers = ['fits_file', 'review_status', 'target', 'gain', 'exposure_sec', 'capture_time', 'temperature_c'];
+            let tsv = headers.join('\t') + '\n';
+
+            frames.forEach(frame => {
+                const row = [
+                    frame.fits_file || '',
+                    frame.review_status || 'unverified',
+                    frame.target || '',
+                    frame.gain || '',
+                    frame.exposure_sec || '',
+                    frame.capture_time || '',
+                    frame.temperature_c || ''
+                ];
+                tsv += row.join('\t') + '\n';
+            });
+
+            // Download file
+            const blob = new Blob([tsv], { type: 'text/tab-separated-values' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>
