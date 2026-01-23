@@ -28,6 +28,14 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
     print("Error: Pillow is required but not installed")
+    
+# Import database module
+try:
+    from fits_database import ensure_database_schema, import_preview_log, get_database_path
+    FITS_DATABASE_AVAILABLE = True
+except ImportError:
+    print("Warning: fits_database.py not found. Database features will be disabled.")
+    FITS_DATABASE_AVAILABLE = False
     print("Install with: pip install Pillow")
     sys.exit(1)
 
@@ -217,7 +225,7 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
     
     with open(preview_log_file, 'w') as log_f:
         # Write log header with new column order
-        log_f.write('status\ttarget\tgain\texposure_sec\tcapture_time\ttemperature_c\tfits_file\tjpeg_file\tjpeg_collection_file\n')
+        log_f.write('status\ttarget\tgain\texposure_sec\tcapture_time\ttemperature_c\tfits_file\tjpeg_file\tjpeg_collection_file\tprocessing_status\n')
         
         for i, (idx, row) in enumerate(frames_df.iterrows(), 1):
             fits_path = Path(row['destination_file'])
@@ -231,35 +239,74 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
             jpeg_dir = fits_path.parent / 'jpegs'
             jpeg_path = jpeg_dir / f"{fits_path.stem}.jpg"
             
-            # Check if JPEG already exists in collection (skip if so)
-            if jpeg_path.name in existing_jpegs:
-                # Skip this file - already processed
-                continue
+            # Keep original path for database lookups (matches organize_log)
+            fits_original_path = str(fits_path)
+            jpeg_original_path = str(jpeg_path)
             
-            # Convert to JPEG
-            success = fits_to_jpeg(fits_path, jpeg_path, max_width, low_pct, high_pct)
+            # Resolve symlinks for web-accessible collection paths only
+            fits_real_path = os.path.realpath(fits_path)
+            jpeg_real_path = os.path.realpath(jpeg_path)
             
-            if success:
+            # Check if JPEG already exists
+            if jpeg_path.exists():
+                # JPEG already exists - record it with 'existing' processing status
+                processing_status = 'existing'
+                review_status = 'unverified'
                 successful += 1
                 
                 # Store record for collection
                 preview_records.append({
-                    'status': 'unreviewed',
+                    'status': review_status,
                     'target': target,
                     'gain': gain,
                     'exposure_sec': exposure,
                     'capture_time': timestamp_str,
                     'temperature_c': temperature,
-                    'fits_file': str(fits_path),
-                    'jpeg_file': str(jpeg_path),
-                    'jpeg_path': jpeg_path
+                    'fits_file': fits_original_path,  # Original path for DB lookup
+                    'jpeg_file': jpeg_original_path,  # Original path
+                    'jpeg_file_collection': jpeg_real_path,  # Resolved path for web
+                    'jpeg_path': jpeg_path,
+                    'processing_status': processing_status
                 })
                 
-                # Write to log with new column order (collection path will be added later)
-                log_f.write(f'unreviewed\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_path}\t{jpeg_path}\t\n')
+                # Write to log - use original paths for DB compatibility
+                log_f.write(f'{review_status}\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_original_path}\t{jpeg_original_path}\t\t{processing_status}\n')
                 log_f.flush()
             else:
-                failed += 1
+                # Convert to JPEG
+                success = fits_to_jpeg(fits_path, jpeg_path, max_width, low_pct, high_pct)
+                
+                if success:
+                    successful += 1
+                    processing_status = 'generated'
+                    review_status = 'unverified'
+                    
+                    # Store record for collection
+                    preview_records.append({
+                        'status': review_status,
+                        'target': target,
+                        'gain': gain,
+                        'exposure_sec': exposure,
+                        'capture_time': timestamp_str,
+                        'temperature_c': temperature,
+                        'fits_file': fits_original_path,  # Original path for DB lookup
+                        'jpeg_file': jpeg_original_path,  # Original path
+                        'jpeg_file_collection': jpeg_real_path,  # Resolved path for web
+                        'jpeg_path': jpeg_path,
+                        'processing_status': processing_status
+                    })
+                    
+                    # Write to log - use original paths for DB compatibility
+                    log_f.write(f'{review_status}\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_original_path}\t{jpeg_original_path}\t\t{processing_status}\n')
+                    log_f.flush()
+                else:
+                    failed += 1
+                    processing_status = 'failed'
+                    review_status = 'discarded'
+                    
+                    # Still record failed conversions - use original path
+                    log_f.write(f'{review_status}\t{target}\t{gain}\t{exposure}\t{timestamp_str}\t{temperature}\t{fits_original_path}\t\t\t{processing_status}\n')
+                    log_f.flush()
             
             # Show early progress after 10 files for large datasets
             if show_early_progress and i == 10 and not early_progress_shown:
@@ -338,7 +385,10 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 # Keep original filename (which includes timestamp for sorting)
                 dst_jpeg = folder / src_jpeg.name
                 shutil.copy2(src_jpeg, dst_jpeg)
-                collection_mapping[str(record['jpeg_file'])] = str(dst_jpeg)
+                # Resolve symlink for collection path (for web access)
+                dst_jpeg_real = os.path.realpath(dst_jpeg)
+                # Map from original jpeg_file path to collection path
+                collection_mapping[record['jpeg_file']] = dst_jpeg_real
         
         # Update log file with collection paths
         print("Updating preview log with collection paths...")
@@ -355,10 +405,17 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
                 if len(parts) >= 8:
                     jpeg_file = parts[7]  # jpeg_file is column 8 (index 7)
                     collection_file = collection_mapping.get(jpeg_file, '')
-                    # Replace empty 9th column with collection path
-                    if len(parts) == 8:
-                        parts.append(collection_file)
-                    elif len(parts) == 9:
+                    # Update collection path column (index 8)
+                    if len(parts) == 9:
+                        # Has processing_status but no collection path yet
+                        parts[8] = collection_file
+                    elif len(parts) == 10:
+                        # Already has both columns
+                        parts[8] = collection_file
+                    else:
+                        # Shouldn't happen, but handle gracefully
+                        while len(parts) < 10:
+                            parts.append('')
                         parts[8] = collection_file
                 f.write('\t'.join(parts) + '\n')
         
@@ -442,6 +499,9 @@ def generate_previews_from_log(log_file, review_base_dir=None, max_width=1920,
     else:
         print(f"Log file:    {preview_log_file}")
     print("=" * 60)
+    
+    return preview_log_file  # Return log file path for database import
+
 
 
 def main():
@@ -499,6 +559,8 @@ Requirements:
                        help='Lower percentile for autostretch (default: 0.1)')
     parser.add_argument('--high', type=float, default=99.9,
                        help='Upper percentile for autostretch (default: 99.9)')
+    parser.add_argument('--skip-db', action='store_true',
+                       help='Skip database import (default: import to SQLite database)')
     
     args = parser.parse_args()
     
@@ -513,8 +575,29 @@ Requirements:
         sys.exit(1)
     
     # Generate previews
-    generate_previews_from_log(args.log_file, args.review_dir, args.width, 
+    preview_log_file = generate_previews_from_log(args.log_file, args.review_dir, args.width, 
                                args.low, args.high, args.include_calibration)
+    
+    # Import to database unless skipped
+    if preview_log_file and not args.skip_db and FITS_DATABASE_AVAILABLE:
+        print()
+        print("=" * 60)
+        print("Importing to database...")
+        print("=" * 60)
+        
+        # Determine database path from organize log location
+        organize_log_path = Path(args.log_file)
+        # Database should be in the output folder (parent of organize log)
+        db_path = organize_log_path.parent / 'astrophotography.db'
+        
+        ensure_database_schema(db_path)
+        import_preview_log(preview_log_file, db_path)
+        print(f"Database: {db_path}")
+    elif not args.skip_db and not FITS_DATABASE_AVAILABLE:
+        print("\nWarning: Database import skipped (fits_database.py not found)")
+    elif args.skip_db:
+        print("\nDatabase import skipped (--skip-db flag)")
+
 
 
 if __name__ == '__main__':
