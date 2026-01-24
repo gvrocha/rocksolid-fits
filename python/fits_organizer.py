@@ -21,7 +21,7 @@ except ImportError:
 
 # Import database module
 try:
-    from fits_database import ensure_database_schema, import_organize_log, get_database_path
+    from fits_database import ensure_database_schema, import_fits_frames, import_fits_headers_only, get_database_path
     FITS_DATABASE_AVAILABLE = True
 except ImportError:
     print("Warning: fits_database.py not found. Database features will be disabled.")
@@ -781,17 +781,17 @@ Examples:
   Interactive mode:
     %(prog)s
   
-  CLI mode - basic organization (US Central timezone):
+  CLI mode - basic organization (US Central timezone, files renamed by default):
     %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6
   
-  CLI mode - with file renaming:
-    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --rename
+  CLI mode - keep original filenames:
+    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --no-rename
   
   CLI mode - session-only, no calibration library:
     %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --no-calib-library
   
   CLI mode - for Brazil imaging trip (São Paulo/Brasília):
-    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -3 --rename
+    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -3
 '''
     )
     parser.add_argument('input_folder', help='Input folder path (where FITS files are)')
@@ -800,8 +800,8 @@ Examples:
                        help='Timezone offset from UTC in hours for session grouping (e.g., -6 for US Central). REQUIRED.')
     parser.add_argument('--no-calib-library', action='store_true',
                        help='Do not use calibration library structure (default: use calibration library)')
-    parser.add_argument('--rename', action='store_true',
-                       help='Rename files to standardized format (default: keep original names)')
+    parser.add_argument('--no-rename', action='store_true',
+                       help='Keep original filenames (default: rename to standardized format)')
     parser.add_argument('--skip-db', action='store_true',
                        help='Skip database import (default: import to SQLite database)')
     
@@ -823,7 +823,7 @@ Examples:
     print(f"Input:  {args.input_folder}")
     print(f"Output: {args.output_folder}")
     print(f"Calibration Library: {not args.no_calib_library}")
-    print(f"Rename Files: {args.rename}")
+    print(f"Rename Files: {not args.no_rename}")
     print(f"Timezone Offset: UTC{args.tz_offset:+.0f}")
     print(f"Database: {'Disabled' if args.skip_db else 'Enabled'}")
     print()
@@ -832,7 +832,7 @@ Examples:
         args.input_folder,
         args.output_folder,
         use_calibration_library=not args.no_calib_library,
-        rename_files=args.rename,
+        rename_files=not args.no_rename,
         tz_offset_hours=args.tz_offset
     )
     
@@ -844,9 +844,12 @@ Examples:
         print("=" * 60)
         db_path = get_database_path(args.output_folder)
         ensure_database_schema(db_path)
-        import_organize_log(log_file, db_path)
+        import_fits_frames(log_file, db_path)
+        print()
+        print("Importing FITS headers...")
+        import_fits_headers_only(log_file, db_path)
         print(f"Database: {db_path}")
-        print("\nNote: Run fits_metadata_extractor_from_log.py to extract metadata and statistics")
+        print("\nNote: Run fits_metadata_extractor_from_log.py to compute image statistics")
     elif not args.skip_db and not FITS_DATABASE_AVAILABLE:
         print("\nWarning: Database import skipped (fits_database.py not found)")
     elif args.skip_db:

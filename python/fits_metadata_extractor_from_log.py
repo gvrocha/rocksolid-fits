@@ -73,15 +73,15 @@ def import_metadata_to_database(metadata_list, log_df, db_path):
     for metadata in metadata_list:
         fits_file = metadata.get('filepath', '')
         
-        # Get fits_file_id from organize_log
+        # Get fits_file_id from fits_frames table
         cursor.execute(
-            "SELECT id FROM organize_log WHERE destination_file = ?",
+            "SELECT id FROM fits_frames WHERE destination_file = ?",
             (fits_file,)
         )
         
         result = cursor.fetchone()
         if not result:
-            print(f"Warning: FITS file not found in organize_log: {fits_file}")
+            print(f"Warning: FITS file not found in fits_frames: {fits_file}")
             files_skipped += 1
             continue
         

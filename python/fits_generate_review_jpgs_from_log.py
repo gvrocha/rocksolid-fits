@@ -28,16 +28,16 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
     print("Error: Pillow is required but not installed")
+    print("Install with: pip install Pillow")
+    sys.exit(1)
     
 # Import database module
 try:
-    from fits_database import ensure_database_schema, import_preview_log, get_database_path
+    from fits_database import ensure_database_schema, import_fits_jpeg_review, get_database_path
     FITS_DATABASE_AVAILABLE = True
 except ImportError:
-    print("Warning: fits_database.py not found. Database features will be disabled.")
     FITS_DATABASE_AVAILABLE = False
-    print("Install with: pip install Pillow")
-    sys.exit(1)
+    print("Warning: fits_database.py not found. Database features will be disabled.")
 
 try:
     import openpyxl
@@ -591,7 +591,7 @@ Requirements:
         db_path = organize_log_path.parent / 'astrophotography.db'
         
         ensure_database_schema(db_path)
-        import_preview_log(preview_log_file, db_path)
+        import_fits_jpeg_review(preview_log_file, db_path)
         print(f"Database: {db_path}")
     elif not args.skip_db and not FITS_DATABASE_AVAILABLE:
         print("\nWarning: Database import skipped (fits_database.py not found)")

@@ -33,7 +33,7 @@ def ensure_database_schema(db_path):
     # Check if schema exists
     cursor.execute("""
         SELECT name FROM sqlite_master 
-        WHERE type='table' AND name='organize_log'
+        WHERE type='table' AND name='fits_frames'
     """)
     
     schema_exists = cursor.fetchone() is not None
@@ -41,9 +41,9 @@ def ensure_database_schema(db_path):
     if not schema_exists:
         print(f"Creating database schema in {db_path}")
         
-        # Main organize log table - tracks all FITS files
+        # Main FITS frames table - tracks all organized FITS files
         cursor.execute('''
-            CREATE TABLE organize_log (
+            CREATE TABLE fits_frames (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_date TEXT NOT NULL,
                 target TEXT,
@@ -61,13 +61,13 @@ def ensure_database_schema(db_path):
         
         # Index for common queries
         cursor.execute('''
-            CREATE INDEX idx_organize_target ON organize_log(target)
+            CREATE INDEX idx_frames_target ON fits_frames(target)
         ''')
         cursor.execute('''
-            CREATE INDEX idx_organize_session ON organize_log(session_date)
+            CREATE INDEX idx_frames_session ON fits_frames(session_date)
         ''')
         cursor.execute('''
-            CREATE INDEX idx_organize_dest_file ON organize_log(destination_file)
+            CREATE INDEX idx_frames_dest_file ON fits_frames(destination_file)
         ''')
         
         # Long/skinny metadata table - stores all FITS header metadata
@@ -79,7 +79,7 @@ def ensure_database_schema(db_path):
                 value_numeric REAL,
                 value_text TEXT,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (fits_file_id) REFERENCES organize_log(id) ON DELETE CASCADE,
+                FOREIGN KEY (fits_file_id) REFERENCES fits_frames(id) ON DELETE CASCADE,
                 UNIQUE(fits_file_id, metadata_key)
             )
         ''')
@@ -91,43 +91,27 @@ def ensure_database_schema(db_path):
             CREATE INDEX idx_metadata_fits_id ON fits_metadata(fits_file_id)
         ''')
         
-        # Preview log table - tracks JPEG generation
+        # JPEG preview and review table - tracks JPEG generation AND review status
         cursor.execute('''
-            CREATE TABLE preview_log (
+            CREATE TABLE fits_jpeg_review (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fits_file_id INTEGER NOT NULL,
-                status TEXT,
                 jpeg_file TEXT,
                 jpeg_collection_file TEXT,
                 processing_status TEXT,
-                imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (fits_file_id) REFERENCES organize_log(id) ON DELETE CASCADE,
-                UNIQUE(fits_file_id)
-            )
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX idx_preview_fits_id ON preview_log(fits_file_id)
-        ''')
-        
-        # Review results table - tracks manual frame selection
-        cursor.execute('''
-            CREATE TABLE review_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fits_file_id INTEGER NOT NULL,
-                review_status TEXT NOT NULL CHECK(review_status IN ('unverified', 'selected', 'discarded', 'undecided')),
+                review_status TEXT DEFAULT 'unverified' CHECK(review_status IN ('unverified', 'selected', 'discarded', 'undecided')),
                 reviewed_at TIMESTAMP,
                 imported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (fits_file_id) REFERENCES organize_log(id) ON DELETE CASCADE,
+                FOREIGN KEY (fits_file_id) REFERENCES fits_frames(id) ON DELETE CASCADE,
                 UNIQUE(fits_file_id)
             )
         ''')
         
         cursor.execute('''
-            CREATE INDEX idx_review_fits_id ON review_results(fits_file_id)
+            CREATE INDEX idx_jpeg_review_fits_id ON fits_jpeg_review(fits_file_id)
         ''')
         cursor.execute('''
-            CREATE INDEX idx_review_status ON review_results(review_status)
+            CREATE INDEX idx_jpeg_review_status ON fits_jpeg_review(review_status)
         ''')
         
         conn.commit()
@@ -142,7 +126,7 @@ def ensure_database_schema(db_path):
     return not schema_exists
 
 
-def import_organize_log(tsv_file, db_path):
+def import_fits_frames(tsv_file, db_path):
     """
     Import organize log TSV into database.
     
@@ -168,7 +152,7 @@ def import_organize_log(tsv_file, db_path):
         try:
             # Check if destination_file already exists
             cursor.execute(
-                "SELECT id FROM organize_log WHERE destination_file = ?",
+                "SELECT id FROM fits_frames WHERE destination_file = ?",
                 (row['destination_file'],)
             )
             
@@ -177,7 +161,7 @@ def import_organize_log(tsv_file, db_path):
                 continue
             
             cursor.execute('''
-                INSERT INTO organize_log 
+                INSERT INTO fits_frames 
                 (session_date, target, filter, gain, exposure_sec, temperature_c, 
                  timestamp, source_file, destination_file, file_hash)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -203,11 +187,11 @@ def import_organize_log(tsv_file, db_path):
     conn.commit()
     conn.close()
     
-    print(f"Imported {imported_count} rows into organize_log (skipped {skipped_count} duplicates)")
+    print(f"Imported {imported_count} rows into fits_frames (skipped {skipped_count} duplicates)")
     return imported_count
 
 
-def import_preview_log(tsv_file, db_path):
+def import_fits_jpeg_review(tsv_file, db_path):
     """
     Import preview log TSV into database.
     
@@ -233,15 +217,15 @@ def import_preview_log(tsv_file, db_path):
         try:
             fits_file = row.get('fits_file', '')
             
-            # Get fits_file_id from organize_log
+            # Get fits_file_id from fits_frames
             cursor.execute(
-                "SELECT id FROM organize_log WHERE destination_file = ?",
+                "SELECT id FROM fits_frames WHERE destination_file = ?",
                 (fits_file,)
             )
             
             result = cursor.fetchone()
             if not result:
-                print(f"Warning: FITS file not found in organize_log: {fits_file}")
+                print(f"Warning: FITS file not found in fits_frames: {fits_file}")
                 skipped_count += 1
                 continue
             
@@ -249,7 +233,7 @@ def import_preview_log(tsv_file, db_path):
             
             # Check if already exists
             cursor.execute(
-                "SELECT id FROM preview_log WHERE fits_file_id = ?",
+                "SELECT id FROM fits_jpeg_review WHERE fits_file_id = ?",
                 (fits_file_id,)
             )
             
@@ -258,12 +242,11 @@ def import_preview_log(tsv_file, db_path):
                 continue
             
             cursor.execute('''
-                INSERT INTO preview_log 
-                (fits_file_id, status, jpeg_file, jpeg_collection_file, processing_status)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO fits_jpeg_review 
+                (fits_file_id, jpeg_file, jpeg_collection_file, processing_status, review_status)
+                VALUES (?, ?, ?, ?, 'unverified')
             ''', (
                 fits_file_id,
-                row.get('status', ''),
                 row.get('jpeg_file', ''),
                 row.get('jpeg_collection_file', ''),
                 row.get('processing_status', '')
@@ -277,20 +260,20 @@ def import_preview_log(tsv_file, db_path):
     conn.commit()
     conn.close()
     
-    print(f"Imported {imported_count} rows into preview_log (skipped {skipped_count} duplicates)")
+    print(f"Imported {imported_count} rows into fits_jpeg_review (skipped {skipped_count} duplicates)")
     return imported_count
 
 
 def import_review_results(tsv_file, db_path):
     """
-    Import review results TSV into database.
+    Import review results TSV and update review_status in fits_jpeg_review table.
     
     Args:
         tsv_file: Path to review results TSV file
         db_path: Path to SQLite database
     
     Returns:
-        Number of rows imported
+        Number of rows updated
     """
     import pandas as pd
     
@@ -300,7 +283,6 @@ def import_review_results(tsv_file, db_path):
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     
-    imported_count = 0
     updated_count = 0
     skipped_count = 0
     
@@ -309,52 +291,42 @@ def import_review_results(tsv_file, db_path):
             fits_file = row.get('fits_file', '')
             review_status = row.get('review_status', 'unverified')
             
-            # Get fits_file_id from organize_log
+            # Get fits_file_id from fits_frames
             cursor.execute(
-                "SELECT id FROM organize_log WHERE destination_file = ?",
+                "SELECT id FROM fits_frames WHERE destination_file = ?",
                 (fits_file,)
             )
             
             result = cursor.fetchone()
             if not result:
-                print(f"Warning: FITS file not found in organize_log: {fits_file}")
+                print(f"Warning: FITS file not found in fits_frames: {fits_file}")
                 skipped_count += 1
                 continue
             
             fits_file_id = result[0]
             
-            # Check if already exists
-            cursor.execute(
-                "SELECT id FROM review_results WHERE fits_file_id = ?",
-                (fits_file_id,)
-            )
+            # Update review_status in fits_jpeg_review
+            cursor.execute('''
+                UPDATE fits_jpeg_review 
+                SET review_status = ?, reviewed_at = CURRENT_TIMESTAMP
+                WHERE fits_file_id = ?
+            ''', (review_status, fits_file_id))
             
-            if cursor.fetchone():
-                # Update existing record
-                cursor.execute('''
-                    UPDATE review_results 
-                    SET review_status = ?, reviewed_at = CURRENT_TIMESTAMP
-                    WHERE fits_file_id = ?
-                ''', (review_status, fits_file_id))
+            if cursor.rowcount > 0:
                 updated_count += 1
             else:
-                # Insert new record
-                cursor.execute('''
-                    INSERT INTO review_results 
-                    (fits_file_id, review_status, reviewed_at)
-                    VALUES (?, ?, CURRENT_TIMESTAMP)
-                ''', (fits_file_id, review_status))
-                imported_count += 1
+                print(f"Warning: No fits_jpeg_review entry found for {fits_file}")
+                skipped_count += 1
             
         except sqlite3.IntegrityError as e:
-            print(f"Error importing review result: {e}")
+            print(f"Error updating review result: {e}")
             skipped_count += 1
     
     conn.commit()
     conn.close()
     
-    print(f"Imported {imported_count} new rows, updated {updated_count} existing rows in review_results (skipped {skipped_count})")
-    return imported_count + updated_count
+    print(f"Updated {updated_count} review statuses in fits_jpeg_review (skipped {skipped_count})")
+    return updated_count
 
 
 def get_database_path(output_folder):
@@ -370,12 +342,146 @@ def get_database_path(output_folder):
     return Path(output_folder) / 'astrophotography.db'
 
 
+def import_fits_headers_only(tsv_file, db_path):
+    """
+    Extract and import ONLY FITS header keywords (fast, no image data reading).
+    
+    Used by fits_organizer.py for quick metadata import during organization.
+    Does NOT compute statistics - use import_fits_metadata() for that.
+    
+    Args:
+        tsv_file: Path to organize log TSV file
+        db_path: Path to SQLite database
+    
+    Returns:
+        Number of FITS files processed
+    """
+    import pandas as pd
+    
+    # Import the header extraction function
+    try:
+        from fits_metadata_utils import extract_fits_headers_only
+    except ImportError:
+        print("Warning: fits_metadata_utils.py not found. Skipping header import.")
+        return 0
+    
+    from astropy.io import fits as astropy_fits
+    
+    # Read TSV
+    df = pd.read_csv(tsv_file, sep='\t')
+    
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    
+    files_processed = 0
+    files_skipped = 0
+    total_metadata_inserted = 0
+    
+    # Keywords to skip (handled in fits_frames table already)
+    skip_keywords = {
+        'SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND',
+        'COMMENT', 'HISTORY', '', 'filepath', 'target_from_path', 'extraction_error'
+    }
+    
+    for _, row in df.iterrows():
+        fits_file = row['destination_file']
+        
+        # Get fits_file_id from fits_frames
+        cursor.execute(
+            "SELECT id FROM fits_frames WHERE destination_file = ?",
+            (fits_file,)
+        )
+        
+        result = cursor.fetchone()
+        if not result:
+            print(f"Warning: FITS file not found in fits_frames: {fits_file}")
+            files_skipped += 1
+            continue
+        
+        fits_file_id = result[0]
+        
+        # Check if metadata already exists for this file
+        cursor.execute(
+            "SELECT COUNT(*) FROM fits_metadata WHERE fits_file_id = ?",
+            (fits_file_id,)
+        )
+        
+        if cursor.fetchone()[0] > 0:
+            files_skipped += 1
+            continue
+        
+        # Extract FITS header (no image data)
+        try:
+            if not Path(fits_file).exists():
+                print(f"Warning: FITS file not found on disk: {fits_file}")
+                files_skipped += 1
+                continue
+            
+            metadata = extract_fits_headers_only(fits_file)
+            
+            if metadata.get('extraction_error'):
+                print(f"Warning: Could not extract headers from {fits_file}: {metadata['extraction_error']}")
+                files_skipped += 1
+                continue
+            
+            metadata_count = 0
+            
+            # Insert header keywords
+            for key, value in metadata.items():
+                if key in skip_keywords:
+                    continue
+                
+                # Determine if numeric or text
+                value_numeric = None
+                value_text = None
+                
+                if isinstance(value, (int, float)):
+                    value_numeric = float(value)
+                elif isinstance(value, bool):
+                    value_numeric = 1.0 if value else 0.0
+                else:
+                    value_text = str(value)
+                
+                # Insert metadata
+                try:
+                    cursor.execute('''
+                        INSERT INTO fits_metadata 
+                        (fits_file_id, metadata_key, value_numeric, value_text)
+                        VALUES (?, ?, ?, ?)
+                    ''', (fits_file_id, key, value_numeric, value_text))
+                    metadata_count += 1
+                except sqlite3.IntegrityError:
+                    # Duplicate key for this file, skip
+                    pass
+            
+            total_metadata_inserted += metadata_count
+            files_processed += 1
+            
+            if files_processed % 10 == 0:
+                conn.commit()  # Commit periodically
+                    
+        except Exception as e:
+            print(f"Error reading FITS header from {fits_file}: {e}")
+            files_skipped += 1
+    
+    conn.commit()
+    conn.close()
+    
+    print(f"Imported headers from {files_processed} FITS files ({total_metadata_inserted} header keywords)")
+    if files_skipped > 0:
+        print(f"Skipped {files_skipped} files (already processed or not found)")
+    return files_processed
+
+
 def import_fits_metadata(tsv_file, db_path):
     """
     Extract and import full FITS header metadata AND computed statistics into the metadata table.
     
+    This function imports EVERYTHING (headers + statistics). If headers were already imported
+    by fits_organizer.py, this will skip files that already have ANY metadata present.
+    
     Reads FITS files listed in organize log and extracts:
-    1. All header keywords
+    1. All header keywords (skipped if already present from organizer)
     2. Computed statistics (mean, median, std, min, max, percentiles)
     3. Saturation counts
     
@@ -400,7 +506,7 @@ def import_fits_metadata(tsv_file, db_path):
     files_skipped = 0
     total_metadata_inserted = 0
     
-    # Keywords to skip (handled in organize_log table already)
+    # Keywords to skip (handled in fits_frames table already)
     skip_keywords = {
         'SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'EXTEND',
         'COMMENT', 'HISTORY', ''  # Skip empty keys
@@ -409,15 +515,15 @@ def import_fits_metadata(tsv_file, db_path):
     for _, row in df.iterrows():
         fits_file = row['destination_file']
         
-        # Get fits_file_id from organize_log
+        # Get fits_file_id from fits_frames
         cursor.execute(
-            "SELECT id FROM organize_log WHERE destination_file = ?",
+            "SELECT id FROM fits_frames WHERE destination_file = ?",
             (fits_file,)
         )
         
         result = cursor.fetchone()
         if not result:
-            print(f"Warning: FITS file not found in organize_log: {fits_file}")
+            print(f"Warning: FITS file not found in fits_frames: {fits_file}")
             files_skipped += 1
             continue
         

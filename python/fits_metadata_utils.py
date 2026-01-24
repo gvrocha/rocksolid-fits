@@ -42,6 +42,51 @@ def extract_target_from_path(filepath):
     return ''
 
 
+def extract_fits_headers_only(filepath):
+    """
+    Extract ONLY FITS header keywords (no image data reading).
+    
+    Fast extraction for organize phase - doesn't compute statistics.
+    
+    Returns dict with:
+    - All FITS header keywords
+    - filepath and target_from_path
+    
+    On failure, returns dict with filepath and error message
+    """
+    if not ASTROPY_AVAILABLE:
+        return {
+            'filepath': str(filepath),
+            'target_from_path': '',
+            'extraction_error': 'astropy not available'
+        }
+    
+    try:
+        with fits.open(filepath) as hdul:
+            header = hdul[0].header
+            
+            # Convert all header items to dict
+            metadata = {}
+            for key, value in header.items():
+                # Handle multi-line comments and special characters
+                if key == 'COMMENT' or key == 'HISTORY':
+                    continue  # Skip these to avoid clutter
+                metadata[key] = value
+            
+            # Add filepath and target
+            metadata['filepath'] = str(filepath)
+            metadata['target_from_path'] = extract_target_from_path(str(filepath))
+            
+            return metadata
+            
+    except Exception as e:
+        return {
+            'filepath': str(filepath),
+            'target_from_path': '',
+            'extraction_error': str(e)
+        }
+
+
 def extract_fits_metadata(filepath):
     """
     Extract all header metadata and image statistics from a FITS file
