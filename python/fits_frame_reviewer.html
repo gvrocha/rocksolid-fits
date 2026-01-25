@@ -55,12 +55,9 @@
             background: #357abd;
         }
 
-        .btn-success {
-            background: #5cb85c;
-        }
-
-        .btn-success:hover {
-            background: #449d44;
+        .btn:disabled {
+            background: #666;
+            cursor: not-allowed;
         }
 
         .main-container {
@@ -84,6 +81,46 @@
             border-bottom: 1px solid #444;
         }
 
+        .filters-section {
+            padding: 15px;
+            background: #252525;
+            border-bottom: 1px solid #444;
+        }
+
+        .filters-section h3 {
+            font-size: 13px;
+            margin-bottom: 10px;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-group {
+            margin-bottom: 12px;
+        }
+
+        .filter-group label {
+            display: block;
+            font-size: 11px;
+            color: #999;
+            margin-bottom: 4px;
+        }
+
+        .filter-group select {
+            width: 100%;
+            padding: 6px 8px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 3px;
+            color: #e0e0e0;
+            font-size: 12px;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: #4a90e2;
+        }
+
         .status-item {
             display: flex;
             justify-content: space-between;
@@ -98,8 +135,8 @@
             font-size: 12px;
         }
 
-        .badge-selected { background: #5cb85c; color: white; }
-        .badge-discarded { background: #d9534f; color: white; }
+        .badge-good { background: #5cb85c; color: white; }
+        .badge-bad { background: #d9534f; color: white; }
         .badge-undecided { background: #f0ad4e; color: white; }
         .badge-unverified { background: #777; color: white; }
 
@@ -107,6 +144,7 @@
             flex: 1;
             overflow-y: auto;
             padding: 10px;
+            min-height: 0;
         }
 
         .frame-item {
@@ -128,8 +166,8 @@
             background: #333;
         }
 
-        .frame-item.status-selected { border-left: 4px solid #5cb85c; }
-        .frame-item.status-discarded { border-left: 4px solid #d9534f; }
+        .frame-item.status-good { border-left: 4px solid #5cb85c; }
+        .frame-item.status-bad { border-left: 4px solid #d9534f; }
         .frame-item.status-undecided { border-left: 4px solid #f0ad4e; }
         .frame-item.status-unverified { border-left: 4px solid #777; }
 
@@ -148,6 +186,46 @@
             font-size: 11px;
             color: #888;
             margin-top: 4px;
+        }
+
+        .keyboard-shortcuts {
+            padding: 10px 20px;
+            background: #2a2a2a;
+            border-top: 1px solid #444;
+            display: flex;
+            gap: 30px;
+            justify-content: center;
+            align-items: center;
+            font-size: 11px;
+            color: #999;
+        }
+
+        .keyboard-shortcuts h3 {
+            font-size: 11px;
+            margin: 0;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .shortcuts-group {
+            display: flex;
+            gap: 15px;
+        }
+
+        .shortcut-item {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .shortcut-key {
+            font-family: monospace;
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            color: #aaa;
         }
 
         .viewer {
@@ -202,12 +280,17 @@
             gap: 8px;
         }
 
-        .btn-discard {
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-bad {
             background: #d9534f;
             color: white;
         }
 
-        .btn-discard:hover {
+        .btn-bad:hover:not(:disabled) {
             background: #c9302c;
             transform: scale(1.05);
         }
@@ -217,17 +300,17 @@
             color: white;
         }
 
-        .btn-undecided:hover {
+        .btn-undecided:hover:not(:disabled) {
             background: #ec971f;
             transform: scale(1.05);
         }
 
-        .btn-select {
+        .btn-good {
             background: #5cb85c;
             color: white;
         }
 
-        .btn-select:hover {
+        .btn-good:hover:not(:disabled) {
             background: #449d44;
             transform: scale(1.05);
         }
@@ -255,57 +338,132 @@
             font-size: 14px;
         }
 
-        input[type="file"] {
-            display: none;
-        }
-
         .image-info {
             position: absolute;
             top: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.8);
             padding: 10px 15px;
             border-radius: 4px;
             font-size: 12px;
-            font-family: monospace;
+            line-height: 1.6;
+        }
+
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-spinner {
+            border: 4px solid #444;
+            border-top: 4px solid #4a90e2;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #d9534f;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin: 10px;
+            display: none;
+        }
+
+        .error-message.active {
+            display: block;
         }
     </style>
 </head>
 <body>
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner"></div>
+    </div>
+
     <div class="header">
         <h1>FITS Frame Reviewer</h1>
-        <div class="load-section">
-            <label for="file-input" class="btn">Load Preview Log</label>
-            <input type="file" id="file-input" accept=".tsv">
-            <button id="demo-btn" class="btn" style="background: #9b59b6;">Load Demo Data</button>
-            <button id="save-btn" class="btn btn-success" style="display: none;">Save Review TSV</button>
-        </div>
     </div>
+
+    <div class="error-message" id="error-message"></div>
 
     <div class="main-container">
         <div class="sidebar">
+            <div class="filters-section">
+                <h3>Filters</h3>
+                <div class="filter-group">
+                    <label>Target</label>
+                    <select id="filter-target" onchange="applyFilters()">
+                        <option value="">All Targets</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Gain</label>
+                    <select id="filter-gain" onchange="applyFilters()">
+                        <option value="">All Gains</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Exposure (sec)</label>
+                    <select id="filter-exposure" onchange="applyFilters()">
+                        <option value="">All Exposures</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Review Status</label>
+                    <select id="filter-status" onchange="applyFilters()">
+                        <option value="">All Statuses</option>
+                        <option value="good">Good</option>
+                        <option value="bad">Bad</option>
+                        <option value="undecided">Undecided</option>
+                        <option value="unverified">Unverified</option>
+                    </select>
+                </div>
+            </div>
             <div class="status-bar">
                 <div class="status-item">
-                    <span>Selected:</span>
-                    <span class="status-badge badge-selected" id="count-selected">0</span>
+                    <span>Good</span>
+                    <span class="status-badge badge-good" id="count-good">0</span>
                 </div>
                 <div class="status-item">
-                    <span>Discarded:</span>
-                    <span class="status-badge badge-discarded" id="count-discarded">0</span>
+                    <span>Bad</span>
+                    <span class="status-badge badge-bad" id="count-bad">0</span>
                 </div>
                 <div class="status-item">
-                    <span>Undecided:</span>
+                    <span>Undecided</span>
                     <span class="status-badge badge-undecided" id="count-undecided">0</span>
                 </div>
                 <div class="status-item">
-                    <span>Unverified:</span>
+                    <span>Unverified</span>
                     <span class="status-badge badge-unverified" id="count-unverified">0</span>
+                </div>
+                <div class="status-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
+                    <span>Showing</span>
+                    <span><span id="count-showing">0</span>/<span id="count-total">0</span></span>
                 </div>
             </div>
             <div class="frame-list" id="frame-list">
                 <div class="empty-state">
-                    <h2>No frames loaded</h2>
-                    <p>Load a preview log file to begin</p>
+                    <h2>Loading...</h2>
+                    <p>Fetching frames from database</p>
                 </div>
             </div>
         </div>
@@ -315,220 +473,177 @@
                 <div class="no-image">Select a frame to review</div>
             </div>
             <div class="controls" id="controls" style="display: none;">
-                <button class="control-btn btn-discard" id="btn-discard">
-                    👎 Discard
-                    <span class="keyboard-hint">(←)</span>
+                <button class="control-btn btn-bad" id="btn-bad">
+                    <span>← Bad</span>
+                    <span class="keyboard-hint">Left Arrow</span>
                 </button>
                 <button class="control-btn btn-undecided" id="btn-undecided">
-                    🤷 Undecided
-                    <span class="keyboard-hint">(↓)</span>
+                    <span>Undecided</span>
+                    <span class="keyboard-hint">Space</span>
                 </button>
-                <button class="control-btn btn-select" id="btn-select">
-                    👍 Select
-                    <span class="keyboard-hint">(→)</span>
+                <button class="control-btn btn-good" id="btn-good">
+                    <span>→ Good</span>
+                    <span class="keyboard-hint">Right Arrow</span>
                 </button>
+            </div>
+            <div class="keyboard-shortcuts">
+                <h3>Keys:</h3>
+                <div class="shortcuts-group">
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">←</span>
+                        <span>Bad</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">Space</span>
+                        <span>Undecided</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">→</span>
+                        <span>Good</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">↓</span>
+                        <span>Next</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">↑</span>
+                        <span>Prev</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <span class="shortcut-key">n</span>
+                        <span>Next Unverified</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         let frames = [];
+        let filteredFrames = [];
         let currentIndex = -1;
+        let updateInProgress = false;
 
-        // Demo mode - Load sample data
-        document.getElementById('demo-btn').addEventListener('click', () => {
-            loadDemoData();
-        });
+        // Load frames from API
+        async function loadFrames() {
+            showLoading(true);
+            hideError();
 
-        function loadDemoData() {
-            // Create sample frames with placeholder images
-            frames = [
-                {
-                    status: 'success',
-                    target: 'M31',
-                    gain: 'gain120',
-                    exposure_sec: '180',
-                    capture_time: '20250119_213045_234',
-                    temperature_c: '-20.1',
-                    fits_file: 'light_20250119_213045_234_m31_ha_gain120_180s_minus20c.fit',
-                    jpeg_file: generatePlaceholderImage('M31 Andromeda Galaxy', '#1a3a5a'),
-                    jpeg_collection_file: '',
-                    review_status: 'unverified'
-                },
-                {
-                    status: 'success',
-                    target: 'M31',
-                    gain: 'gain120',
-                    exposure_sec: '180',
-                    capture_time: '20250119_213348_567',
-                    temperature_c: '-20.0',
-                    fits_file: 'light_20250119_213348_567_m31_ha_gain120_180s_minus20c.fit',
-                    jpeg_file: generatePlaceholderImage('M31 Andromeda Galaxy', '#1a4a6a'),
-                    jpeg_collection_file: '',
-                    review_status: 'unverified'
-                },
-                {
-                    status: 'success',
-                    target: 'M31',
-                    gain: 'gain120',
-                    exposure_sec: '180',
-                    capture_time: '20250119_213651_890',
-                    temperature_c: '-19.9',
-                    fits_file: 'light_20250119_213651_890_m31_ha_gain120_180s_minus20c.fit',
-                    jpeg_file: generatePlaceholderImage('M31 Andromeda Galaxy', '#2a3a5a', true),
-                    jpeg_collection_file: '',
-                    review_status: 'unverified'
+            try {
+                const response = await fetch('/api/frames');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-            ];
+                
+                frames = await response.json();
+                populateFilters();
+                applyFilters();
 
-            renderFrameList();
-            updateStatusCounts();
-            document.getElementById('save-btn').style.display = 'block';
-
-            // Auto-select first frame
-            if (frames.length > 0) {
-                selectFrame(0);
+            } catch (error) {
+                showError(`Failed to load frames: ${error.message}`);
+                console.error('Error loading frames:', error);
+            } finally {
+                showLoading(false);
             }
         }
 
-        function generatePlaceholderImage(label, bgColor, addNoise = false) {
-            const canvas = document.createElement('canvas');
-            canvas.width = 800;
-            canvas.height = 600;
-            const ctx = canvas.getContext('2d');
+        function populateFilters() {
+            // Get unique values for each filter
+            const targets = [...new Set(frames.map(f => f.target).filter(Boolean))].sort();
+            const gains = [...new Set(frames.map(f => f.gain).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
+            const exposures = [...new Set(frames.map(f => f.exposure_sec).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
 
-            // Background gradient
-            const gradient = ctx.createRadialGradient(400, 300, 50, 400, 300, 400);
-            gradient.addColorStop(0, bgColor);
-            gradient.addColorStop(1, '#0a0a0a');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, 0, 800, 600);
+            // Populate target filter
+            const targetSelect = document.getElementById('filter-target');
+            targetSelect.innerHTML = '<option value="">All Targets</option>';
+            targets.forEach(target => {
+                const option = document.createElement('option');
+                option.value = target;
+                option.textContent = target;
+                targetSelect.appendChild(option);
+            });
 
-            // Add some "stars"
-            ctx.fillStyle = 'white';
-            for (let i = 0; i < 200; i++) {
-                const x = Math.random() * 800;
-                const y = Math.random() * 600;
-                const size = Math.random() * 2;
-                ctx.beginPath();
-                ctx.arc(x, y, size, 0, Math.PI * 2);
-                ctx.fill();
-            }
+            // Populate gain filter
+            const gainSelect = document.getElementById('filter-gain');
+            gainSelect.innerHTML = '<option value="">All Gains</option>';
+            gains.forEach(gain => {
+                const option = document.createElement('option');
+                option.value = gain;
+                option.textContent = gain;
+                gainSelect.appendChild(option);
+            });
 
-            // Add some brighter stars
-            for (let i = 0; i < 20; i++) {
-                const x = Math.random() * 800;
-                const y = Math.random() * 600;
-                const size = Math.random() * 3 + 2;
-                const glow = ctx.createRadialGradient(x, y, 0, x, y, size * 3);
-                glow.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-                glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
-                ctx.fillStyle = glow;
-                ctx.beginPath();
-                ctx.arc(x, y, size * 3, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            // Add central galaxy glow
-            const galaxyGlow = ctx.createRadialGradient(400, 300, 10, 400, 300, 150);
-            galaxyGlow.addColorStop(0, 'rgba(200, 200, 255, 0.3)');
-            galaxyGlow.addColorStop(0.5, 'rgba(150, 150, 200, 0.1)');
-            galaxyGlow.addColorStop(1, 'rgba(100, 100, 150, 0)');
-            ctx.fillStyle = galaxyGlow;
-            ctx.fillRect(200, 150, 400, 300);
-
-            // Optional: Add noise/artifacts for "bad" frame
-            if (addNoise) {
-                ctx.fillStyle = 'rgba(255, 100, 100, 0.1)';
-                ctx.fillRect(0, 0, 200, 600); // Gradient issue
-                
-                // Add satellite trail
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(100, 100);
-                ctx.lineTo(700, 500);
-                ctx.stroke();
-
-                // Label the issue
-                ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
-                ctx.font = 'bold 20px Arial';
-                ctx.fillText('SATELLITE TRAIL', 300, 50);
-            }
-
-            // Add label
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.font = '16px Arial';
-            ctx.fillText(label, 20, 580);
-
-            return canvas.toDataURL();
+            // Populate exposure filter
+            const exposureSelect = document.getElementById('filter-exposure');
+            exposureSelect.innerHTML = '<option value="">All Exposures</option>';
+            exposures.forEach(exp => {
+                const option = document.createElement('option');
+                option.value = exp;
+                option.textContent = `${exp}s`;
+                exposureSelect.appendChild(option);
+            });
         }
 
-        // Load TSV file
-        document.getElementById('file-input').addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+        function applyFilters() {
+            const targetFilter = document.getElementById('filter-target').value;
+            const gainFilter = document.getElementById('filter-gain').value;
+            const exposureFilter = document.getElementById('filter-exposure').value;
+            const statusFilter = document.getElementById('filter-status').value;
 
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                parseTSV(event.target.result);
-            };
-            reader.readAsText(file);
-        });
-
-        function parseTSV(content) {
-            const lines = content.trim().split('\n');
-            const headers = lines[0].split('\t');
-
-            frames = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = lines[i].split('\t');
-                const frame = {};
-                headers.forEach((header, idx) => {
-                    frame[header] = values[idx] || '';
-                });
-                
-                // Initialize review_status from the status column
-                // Map from TSV status to review status
-                if (frame.status === 'unverified') {
-                    frame.review_status = 'unverified';
-                } else if (frame.status === 'discarded') {
-                    frame.review_status = 'discarded';
-                } else {
-                    // Default to unverified if not specified
-                    frame.review_status = 'unverified';
-                }
-                
-                frames.push(frame);
-            }
+            filteredFrames = frames.filter(frame => {
+                if (targetFilter && frame.target !== targetFilter) return false;
+                if (gainFilter && String(frame.gain) !== gainFilter) return false;
+                if (exposureFilter && String(frame.exposure_sec) !== exposureFilter) return false;
+                if (statusFilter && frame.review_status !== statusFilter) return false;
+                return true;
+            });
 
             renderFrameList();
             updateStatusCounts();
-            document.getElementById('save-btn').style.display = 'block';
 
-            // Auto-select first frame
-            if (frames.length > 0) {
-                selectFrame(0);
+            // Auto-select first filtered frame
+            if (filteredFrames.length > 0) {
+                const firstFilteredIndex = frames.indexOf(filteredFrames[0]);
+                selectFrame(firstFilteredIndex);
+            } else {
+                currentIndex = -1;
+                document.getElementById('image-container').innerHTML = '<div class="no-image">No frames match filters</div>';
+                document.getElementById('controls').style.display = 'none';
             }
         }
 
         function renderFrameList() {
             const container = document.getElementById('frame-list');
+            
+            if (filteredFrames.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>No Frames Found</h2>
+                        <p>${frames.length === 0 ? 'No JPEG reviews in database' : 'No frames match filters'}</p>
+                    </div>
+                `;
+                return;
+            }
+
             container.innerHTML = '';
 
-            frames.forEach((frame, index) => {
+            filteredFrames.forEach((frame) => {
+                const frameIndex = frames.indexOf(frame);
                 const div = document.createElement('div');
                 div.className = `frame-item status-${frame.review_status}`;
-                div.onclick = () => selectFrame(index);
+                div.dataset.frameIndex = frameIndex; // Store global index for active matching
+                div.onclick = () => selectFrame(frameIndex);
 
-                const captureTime = frame.capture_time || '';
-                const displayTime = captureTime.replace('_', ' ').replace(/-/g, ':');
+                // Format timestamp for display
+                const timestamp = frame.timestamp || frame.session_date || '';
+                const displayTime = timestamp.replace('T', ' ').substring(0, 19);
 
                 div.innerHTML = `
                     <div class="frame-target">${frame.target || 'Unknown'}</div>
                     <div class="frame-time">${displayTime}</div>
                     <div class="frame-details">
-                        ${frame.exposure_sec}s · ${frame.gain} · ${frame.temperature_c}°C
+                        ${frame.exposure_sec || '?'}s · ${frame.gain || '?'} · ${frame.temperature_c || '?'}°C
+                        ${frame.filter ? ' · ' + frame.filter : ''}
                     </div>
                 `;
 
@@ -540,145 +655,222 @@
             if (index < 0 || index >= frames.length) return;
 
             currentIndex = index;
+            const selectedFrame = frames[index];
 
-            // Update active state in list
-            document.querySelectorAll('.frame-item').forEach((item, idx) => {
-                item.classList.toggle('active', idx === index);
+            // Update active state in list - match by frame object, not index
+            document.querySelectorAll('.frame-item').forEach((item) => {
+                const itemFrameIndex = parseInt(item.dataset.frameIndex);
+                item.classList.toggle('active', itemFrameIndex === index);
             });
 
             // Display image
             const frame = frames[index];
             const imageContainer = document.getElementById('image-container');
             
-            const jpegPath = frame.jpeg_collection_file || frame.jpeg_file;
-            if (jpegPath) {
-                imageContainer.innerHTML = `
-                    <div class="image-info">
-                        ${frame.target} · ${frame.exposure_sec}s · ${frame.gain}<br>
-                        ${frame.capture_time} · ${frame.temperature_c}°C
-                    </div>
-                    <img src="${jpegPath}" alt="Frame">
-                `;
-            } else {
-                imageContainer.innerHTML = '<div class="no-image">Image not found</div>';
-            }
+            // Format timestamp for display
+            const timestamp = frame.timestamp || frame.session_date || '';
+            const displayTime = timestamp.replace('T', ' ').substring(0, 19);
+            
+            // Format camera display
+            const cameraInfo = frame.camera ? `<br>${frame.camera}` : '';
+            
+            imageContainer.innerHTML = `
+                <div class="image-info">
+                    ${frame.target || 'Unknown'} · ${frame.exposure_sec || '?'}s · ${frame.gain || '?'}
+                    ${frame.filter ? ' · ' + frame.filter : ''}<br>
+                    ${displayTime} · ${frame.temperature_c || '?'}°C${cameraInfo}
+                </div>
+                <img src="/images/${frame.filename}" alt="Frame" onerror="this.parentElement.innerHTML='<div class=\\'no-image\\'>Image not found</div>'">
+            `;
 
             // Show controls
             document.getElementById('controls').style.display = 'flex';
         }
 
-        function setStatus(status) {
-            if (currentIndex < 0) return;
+        async function setStatus(status) {
+            if (currentIndex < 0 || updateInProgress) return;
 
-            frames[currentIndex].review_status = status;
-            
-            // Update the frame item styling
+            const frame = frames[currentIndex];
+            const previousStatus = frame.review_status;
+
+            // Optimistically update UI
+            frame.review_status = status;
             const frameItems = document.querySelectorAll('.frame-item');
-            frameItems[currentIndex].className = `frame-item status-${status} active`;
-
+            
+            // Find the item in the filtered list
+            const filteredIndex = filteredFrames.indexOf(frame);
+            if (filteredIndex >= 0 && frameItems[filteredIndex]) {
+                frameItems[filteredIndex].className = `frame-item status-${status} active`;
+            }
+            
             updateStatusCounts();
 
-            // Auto-advance to next unverified frame
-            advanceToNextUnverified();
+            // Disable buttons during update
+            updateInProgress = true;
+            disableButtons(true);
+
+            try {
+                const response = await fetch(`/api/frames/${frame.id}/review`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ status: status })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                // Auto-advance to next frame in filtered set
+                const currentFilteredIndex = filteredFrames.indexOf(frame);
+                if (currentFilteredIndex < filteredFrames.length - 1) {
+                    const nextFrameIndex = frames.indexOf(filteredFrames[currentFilteredIndex + 1]);
+                    selectFrame(nextFrameIndex);
+                }
+
+            } catch (error) {
+                // Revert on error
+                frame.review_status = previousStatus;
+                if (filteredIndex >= 0 && frameItems[filteredIndex]) {
+                    frameItems[filteredIndex].className = `frame-item status-${previousStatus} active`;
+                }
+                updateStatusCounts();
+                
+                showError(`Failed to update status: ${error.message}`);
+                console.error('Error updating status:', error);
+            } finally {
+                updateInProgress = false;
+                disableButtons(false);
+            }
         }
 
-        function advanceToNextUnverified() {
-            // Find next unverified frame
-            for (let i = currentIndex + 1; i < frames.length; i++) {
-                if (frames[i].review_status === 'unverified') {
-                    selectFrame(i);
+        function advanceToNextUndecided() {
+            // Find next unverified frame in filtered set
+            const currentFilteredIndex = filteredFrames.indexOf(frames[currentIndex]);
+            
+            for (let i = currentFilteredIndex + 1; i < filteredFrames.length; i++) {
+                if (filteredFrames[i].review_status === 'unverified') {
+                    const frameIndex = frames.indexOf(filteredFrames[i]);
+                    selectFrame(frameIndex);
                     return;
                 }
             }
 
-            // If no unverified frames ahead, try from beginning
-            for (let i = 0; i < currentIndex; i++) {
-                if (frames[i].review_status === 'unverified') {
-                    selectFrame(i);
+            // If no unverified frames ahead in filtered set, try from beginning
+            for (let i = 0; i < currentFilteredIndex; i++) {
+                if (filteredFrames[i].review_status === 'unverified') {
+                    const frameIndex = frames.indexOf(filteredFrames[i]);
+                    selectFrame(frameIndex);
                     return;
                 }
             }
 
-            // All frames reviewed - just move to next
-            if (currentIndex < frames.length - 1) {
-                selectFrame(currentIndex + 1);
-            }
+            // No unverified frames found - stay on current frame
         }
 
         function updateStatusCounts() {
             const counts = {
-                selected: 0,
-                discarded: 0,
+                good: 0,
+                bad: 0,
                 undecided: 0,
                 unverified: 0
             };
 
-            frames.forEach(frame => {
+            // Count within filtered frames
+            filteredFrames.forEach(frame => {
                 counts[frame.review_status]++;
             });
 
-            document.getElementById('count-selected').textContent = counts.selected;
-            document.getElementById('count-discarded').textContent = counts.discarded;
+            document.getElementById('count-good').textContent = counts.good;
+            document.getElementById('count-bad').textContent = counts.bad;
             document.getElementById('count-undecided').textContent = counts.undecided;
             document.getElementById('count-unverified').textContent = counts.unverified;
+            document.getElementById('count-showing').textContent = filteredFrames.length;
+            document.getElementById('count-total').textContent = frames.length;
+        }
+
+        function disableButtons(disabled) {
+            document.getElementById('btn-bad').disabled = disabled;
+            document.getElementById('btn-undecided').disabled = disabled;
+            document.getElementById('btn-good').disabled = disabled;
+        }
+
+        function showLoading(show) {
+            const overlay = document.getElementById('loading-overlay');
+            if (show) {
+                overlay.classList.add('active');
+            } else {
+                overlay.classList.remove('active');
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.classList.add('active');
+            
+            // Auto-hide after 5 seconds
+            setTimeout(() => {
+                hideError();
+            }, 5000);
+        }
+
+        function hideError() {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.classList.remove('active');
         }
 
         // Button handlers
-        document.getElementById('btn-discard').addEventListener('click', () => setStatus('discarded'));
+        document.getElementById('btn-bad').addEventListener('click', () => setStatus('bad'));
         document.getElementById('btn-undecided').addEventListener('click', () => setStatus('undecided'));
-        document.getElementById('btn-select').addEventListener('click', () => setStatus('selected'));
+        document.getElementById('btn-good').addEventListener('click', () => setStatus('good'));
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
-            if (currentIndex < 0) return;
+            if (currentIndex < 0 || updateInProgress) return;
 
             switch(e.key) {
                 case 'ArrowLeft':
-                    setStatus('discarded');
+                    setStatus('bad');
                     break;
-                case 'ArrowDown':
+                case ' ':
+                    e.preventDefault(); // Prevent page scroll
                     setStatus('undecided');
                     break;
                 case 'ArrowRight':
-                    setStatus('selected');
+                    setStatus('good');
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault(); // Prevent page scroll
+                    // Move to next frame in filtered set (no status change)
+                    const currentFilteredIndex = filteredFrames.indexOf(frames[currentIndex]);
+                    if (currentFilteredIndex < filteredFrames.length - 1) {
+                        const nextFrameIndex = frames.indexOf(filteredFrames[currentFilteredIndex + 1]);
+                        selectFrame(nextFrameIndex);
+                    }
+                    break;
+                case 'n':
+                case 'N':
+                    // Move to next undecided frame in filtered set
+                    advanceToNextUndecided();
                     break;
                 case 'ArrowUp':
-                    // Go to previous frame
-                    if (currentIndex > 0) selectFrame(currentIndex - 1);
+                    // Go to previous frame in filtered set
+                    const prevFilteredIndex = filteredFrames.indexOf(frames[currentIndex]);
+                    if (prevFilteredIndex > 0) {
+                        const prevFrameIndex = frames.indexOf(filteredFrames[prevFilteredIndex - 1]);
+                        selectFrame(prevFrameIndex);
+                    }
                     break;
             }
         });
 
-        // Save review results
-        document.getElementById('save-btn').addEventListener('click', () => {
-            const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0].replace('T', '_');
-            const filename = `frame_review_${timestamp}.tsv`;
-
-            // Create TSV content
-            const headers = ['fits_file', 'review_status', 'target', 'gain', 'exposure_sec', 'capture_time', 'temperature_c'];
-            let tsv = headers.join('\t') + '\n';
-
-            frames.forEach(frame => {
-                const row = [
-                    frame.fits_file || '',
-                    frame.review_status || 'unverified',
-                    frame.target || '',
-                    frame.gain || '',
-                    frame.exposure_sec || '',
-                    frame.capture_time || '',
-                    frame.temperature_c || ''
-                ];
-                tsv += row.join('\t') + '\n';
-            });
-
-            // Download file
-            const blob = new Blob([tsv], { type: 'text/tab-separated-values' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
+        // Load frames on page load
+        window.addEventListener('load', () => {
+            loadFrames();
         });
     </script>
 </body>
