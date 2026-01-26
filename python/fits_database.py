@@ -8,7 +8,7 @@ for the astrophotography workflow.
 import sqlite3
 import os.path
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 def ensure_database_schema(db_path):
@@ -51,6 +51,8 @@ def ensure_database_schema(db_path):
                 gain TEXT,
                 exposure_sec REAL,
                 temperature_c REAL,
+                recorded_timestamp TEXT,
+                tz_offset_hours REAL,
                 timestamp TEXT,
                 source_file TEXT NOT NULL,
                 destination_file TEXT UNIQUE NOT NULL,
@@ -126,13 +128,14 @@ def ensure_database_schema(db_path):
     return not schema_exists
 
 
-def import_fits_frames(tsv_file, db_path):
+def import_fits_frames(tsv_file, db_path, tz_offset_hours=None):
     """
     Import organize log TSV into database.
     
     Args:
         tsv_file: Path to organize log TSV file
         db_path: Path to SQLite database
+        tz_offset_hours: Timezone offset used during organization (optional, for reference)
     
     Returns:
         Number of rows imported
@@ -147,6 +150,7 @@ def import_fits_frames(tsv_file, db_path):
     
     imported_count = 0
     skipped_count = 0
+    computed_timestamp_count = 0
     
     for _, row in df.iterrows():
         try:
@@ -160,20 +164,78 @@ def import_fits_frames(tsv_file, db_path):
                 skipped_count += 1
                 continue
             
+            # Get source file (organize log calls it 'origin_file')
+            source_file = row.get('origin_file', row.get('source_file', ''))
+            
+            # Get recorded_timestamp (original from FITS header, in UTC)
+            recorded_timestamp = row.get('timestamp', '')
+            
+            # Get timezone offset from parameter (used during organize)
+            # Store it for reference
+            tz_offset = tz_offset_hours
+            if tz_offset is not None:
+                tz_offset = float(tz_offset)
+            
+            # Compute adjusted timestamp and session_date
+            timestamp = recorded_timestamp  # Default: same as recorded
+            session_date = row.get('session_date', '')
+            
+            if recorded_timestamp and len(recorded_timestamp) >= 15:
+                try:
+                    # Parse recorded timestamp: YYYYMMDD_HHMMSS_mmm
+                    date_str = recorded_timestamp[:8]  # YYYYMMDD
+                    time_str = recorded_timestamp[9:15]  # HHMMSS
+                    milliseconds = recorded_timestamp[16:19] if len(recorded_timestamp) >= 19 else '000'
+                    
+                    dt = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M%S")
+                    
+                    # Apply timezone offset if available
+                    if tz_offset is not None:
+                        dt = dt + timedelta(hours=tz_offset)
+                        
+                        # Reformat as timestamp with adjusted time
+                        timestamp = f"{dt.strftime('%Y%m%d_%H%M%S')}_{milliseconds}"
+                        computed_timestamp_count += 1
+                    
+                    # Compute session_date from adjusted timestamp (noon-to-noon logic)
+                    if not session_date or session_date == '':
+                        session_dt = dt
+                        if session_dt.hour < 12:
+                            session_dt = session_dt - timedelta(days=1)
+                        session_date = session_dt.strftime('%Y%m%d')
+                    
+                except Exception as e:
+                    print(f"Warning: Could not process timestamp for {row.get('destination_file', 'unknown')}: {e}")
+            
+            # If session_date still empty, try fallback without timezone adjustment
+            if not session_date or session_date == '':
+                if recorded_timestamp and len(recorded_timestamp) >= 15:
+                    try:
+                        date_str = recorded_timestamp[:8]
+                        time_str = recorded_timestamp[9:15]
+                        dt = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M%S")
+                        if dt.hour < 12:
+                            dt = dt - timedelta(days=1)
+                        session_date = dt.strftime('%Y%m%d')
+                    except:
+                        session_date = ''
+            
             cursor.execute('''
                 INSERT INTO fits_frames 
                 (session_date, target, filter, gain, exposure_sec, temperature_c, 
-                 timestamp, source_file, destination_file, file_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 recorded_timestamp, tz_offset_hours, timestamp, source_file, destination_file, file_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                row.get('session_date', ''),
+                session_date,
                 row.get('target', ''),
                 row.get('filter', ''),
                 row.get('gain', ''),
                 row.get('exposure_sec', None),
                 row.get('temperature_c', None),
-                row.get('timestamp', ''),
-                row.get('source_file', ''),
+                recorded_timestamp,
+                tz_offset,
+                timestamp,
+                source_file,
                 row.get('destination_file', ''),
                 row.get('file_hash', '')
             ))
@@ -188,7 +250,10 @@ def import_fits_frames(tsv_file, db_path):
     conn.close()
     
     print(f"Imported {imported_count} rows into fits_frames (skipped {skipped_count} duplicates)")
+    if computed_timestamp_count > 0 and tz_offset_hours is not None:
+        print(f"Note: Applied timezone offset ({tz_offset_hours:+.1f}h) to {computed_timestamp_count} timestamps")
     return imported_count
+
 
 
 def import_fits_jpeg_review(tsv_file, db_path):

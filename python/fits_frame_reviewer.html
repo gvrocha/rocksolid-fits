@@ -67,56 +67,72 @@
         }
 
         .sidebar {
-            width: 300px;
+            width: 450px;
             background: #252525;
             border-right: 1px solid #444;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .sidebar-left {
+            width: 200px;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #444;
+        }
+
+        .sidebar-right {
+            flex: 1;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
         .status-bar {
-            padding: 15px;
+            padding: 10px;
             background: #2a2a2a;
             border-bottom: 1px solid #444;
         }
 
         .filters-section {
-            padding: 15px;
+            padding: 10px;
             background: #252525;
             border-bottom: 1px solid #444;
+            overflow-y: auto;
         }
 
         .filters-section h3 {
-            font-size: 13px;
-            margin-bottom: 10px;
+            font-size: 11px;
+            margin-bottom: 8px;
             color: #aaa;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
         .filter-group {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
 
         .filter-group label {
             display: block;
-            font-size: 11px;
+            font-size: 10px;
             color: #999;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
         }
 
-        .filter-group select {
+        .filter-group select,
+        .filter-group input {
             width: 100%;
-            padding: 6px 8px;
+            padding: 5px 6px;
             background: #2a2a2a;
             border: 1px solid #444;
             border-radius: 3px;
             color: #e0e0e0;
-            font-size: 12px;
+            font-size: 11px;
         }
 
-        .filter-group select:focus {
+        .filter-group select:focus,
+        .filter-group input:focus {
             outline: none;
             border-color: #4a90e2;
         }
@@ -124,15 +140,15 @@
         .status-item {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 8px;
-            font-size: 14px;
+            margin-bottom: 6px;
+            font-size: 11px;
         }
 
         .status-badge {
-            padding: 2px 8px;
+            padding: 2px 6px;
             border-radius: 3px;
             font-weight: 600;
-            font-size: 12px;
+            font-size: 10px;
         }
 
         .badge-good { background: #5cb85c; color: white; }
@@ -145,6 +161,7 @@
             overflow-y: auto;
             padding: 10px;
             min-height: 0;
+            scroll-behavior: smooth;
         }
 
         .frame-item {
@@ -407,63 +424,79 @@
 
     <div class="main-container">
         <div class="sidebar">
-            <div class="filters-section">
-                <h3>Filters</h3>
-                <div class="filter-group">
-                    <label>Target</label>
-                    <select id="filter-target" onchange="applyFilters()">
-                        <option value="">All Targets</option>
-                    </select>
+            <div class="sidebar-left">
+                <div class="filters-section">
+                    <h3>Filters</h3>
+                    <div class="filter-group">
+                        <label>Start Date</label>
+                        <select id="filter-date-start" onchange="applyFilters()">
+                            <option value="">No Limit</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>End Date</label>
+                        <select id="filter-date-end" onchange="applyFilters()">
+                            <option value="">No Limit</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Target</label>
+                        <select id="filter-target" onchange="applyFilters()">
+                            <option value="">All Targets</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Gain</label>
+                        <select id="filter-gain" onchange="applyFilters()">
+                            <option value="">All Gains</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Exposure (sec)</label>
+                        <select id="filter-exposure" onchange="applyFilters()">
+                            <option value="">All Exposures</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Review Status</label>
+                        <select id="filter-status" onchange="applyFilters()">
+                            <option value="">All Statuses</option>
+                            <option value="good">Good</option>
+                            <option value="bad">Bad</option>
+                            <option value="undecided">Undecided</option>
+                            <option value="unverified">Unverified</option>
+                        </select>
+                    </div>
                 </div>
-                <div class="filter-group">
-                    <label>Gain</label>
-                    <select id="filter-gain" onchange="applyFilters()">
-                        <option value="">All Gains</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Exposure (sec)</label>
-                    <select id="filter-exposure" onchange="applyFilters()">
-                        <option value="">All Exposures</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label>Review Status</label>
-                    <select id="filter-status" onchange="applyFilters()">
-                        <option value="">All Statuses</option>
-                        <option value="good">Good</option>
-                        <option value="bad">Bad</option>
-                        <option value="undecided">Undecided</option>
-                        <option value="unverified">Unverified</option>
-                    </select>
+                <div class="status-bar">
+                    <div class="status-item">
+                        <span>Good</span>
+                        <span class="status-badge badge-good" id="count-good">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span>Bad</span>
+                        <span class="status-badge badge-bad" id="count-bad">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span>Undecided</span>
+                        <span class="status-badge badge-undecided" id="count-undecided">0</span>
+                    </div>
+                    <div class="status-item">
+                        <span>Unverified</span>
+                        <span class="status-badge badge-unverified" id="count-unverified">0</span>
+                    </div>
+                    <div class="status-item" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #444;">
+                        <span>Showing</span>
+                        <span><span id="count-showing">0</span>/<span id="count-total">0</span></span>
+                    </div>
                 </div>
             </div>
-            <div class="status-bar">
-                <div class="status-item">
-                    <span>Good</span>
-                    <span class="status-badge badge-good" id="count-good">0</span>
-                </div>
-                <div class="status-item">
-                    <span>Bad</span>
-                    <span class="status-badge badge-bad" id="count-bad">0</span>
-                </div>
-                <div class="status-item">
-                    <span>Undecided</span>
-                    <span class="status-badge badge-undecided" id="count-undecided">0</span>
-                </div>
-                <div class="status-item">
-                    <span>Unverified</span>
-                    <span class="status-badge badge-unverified" id="count-unverified">0</span>
-                </div>
-                <div class="status-item" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #444;">
-                    <span>Showing</span>
-                    <span><span id="count-showing">0</span>/<span id="count-total">0</span></span>
-                </div>
-            </div>
-            <div class="frame-list" id="frame-list">
-                <div class="empty-state">
-                    <h2>Loading...</h2>
-                    <p>Fetching frames from database</p>
+            <div class="sidebar-right">
+                <div class="frame-list" id="frame-list">
+                    <div class="empty-state">
+                        <h2>Loading...</h2>
+                        <p>Fetching frames from database</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -547,11 +580,42 @@
             }
         }
 
+        function formatSessionDate(sessionDate) {
+            // Convert YYYYMMDD to YYYY.MM.DD
+            if (sessionDate && sessionDate.length === 8) {
+                return `${sessionDate.substring(0,4)}.${sessionDate.substring(4,6)}.${sessionDate.substring(6,8)}`;
+            }
+            return sessionDate;
+        }
+
         function populateFilters() {
             // Get unique values for each filter
+            const sessionDates = [...new Set(frames.map(f => f.session_date).filter(Boolean))].sort();
+            console.log('Session dates found:', sessionDates);
             const targets = [...new Set(frames.map(f => f.target).filter(Boolean))].sort();
             const gains = [...new Set(frames.map(f => f.gain).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
             const exposures = [...new Set(frames.map(f => f.exposure_sec).filter(v => v !== null && v !== undefined))].sort((a, b) => a - b);
+
+            // Populate start date filter
+            const dateStartSelect = document.getElementById('filter-date-start');
+            dateStartSelect.innerHTML = '<option value="">No Limit</option>';
+            sessionDates.forEach(date => {
+                const option = document.createElement('option');
+                option.value = date;
+                option.textContent = formatSessionDate(date);
+                dateStartSelect.appendChild(option);
+            });
+            console.log('Populated start date filter with', sessionDates.length, 'dates');
+
+            // Populate end date filter
+            const dateEndSelect = document.getElementById('filter-date-end');
+            dateEndSelect.innerHTML = '<option value="">No Limit</option>';
+            sessionDates.forEach(date => {
+                const option = document.createElement('option');
+                option.value = date;
+                option.textContent = formatSessionDate(date);
+                dateEndSelect.appendChild(option);
+            });
 
             // Populate target filter
             const targetSelect = document.getElementById('filter-target');
@@ -585,12 +649,18 @@
         }
 
         function applyFilters() {
+            const dateStart = document.getElementById('filter-date-start').value;
+            const dateEnd = document.getElementById('filter-date-end').value;
             const targetFilter = document.getElementById('filter-target').value;
             const gainFilter = document.getElementById('filter-gain').value;
             const exposureFilter = document.getElementById('filter-exposure').value;
             const statusFilter = document.getElementById('filter-status').value;
 
             filteredFrames = frames.filter(frame => {
+                // Date filtering (session_date is in YYYYMMDD format)
+                if (dateStart && frame.session_date < dateStart) return false;
+                if (dateEnd && frame.session_date > dateEnd) return false;
+                
                 if (targetFilter && frame.target !== targetFilter) return false;
                 if (gainFilter && String(frame.gain) !== gainFilter) return false;
                 if (exposureFilter && String(frame.exposure_sec) !== exposureFilter) return false;
@@ -658,10 +728,24 @@
             const selectedFrame = frames[index];
 
             // Update active state in list - match by frame object, not index
+            let activeElement = null;
             document.querySelectorAll('.frame-item').forEach((item) => {
                 const itemFrameIndex = parseInt(item.dataset.frameIndex);
-                item.classList.toggle('active', itemFrameIndex === index);
+                const isActive = itemFrameIndex === index;
+                item.classList.toggle('active', isActive);
+                if (isActive) {
+                    activeElement = item;
+                }
             });
+
+            // Scroll active frame to top of visible list area
+            if (activeElement) {
+                const frameList = document.getElementById('frame-list');
+                const itemOffsetTop = activeElement.offsetTop - frameList.offsetTop;
+                
+                // Scroll to show item at top with small padding
+                frameList.scrollTop = itemOffsetTop - 10;
+            }
 
             // Display image
             const frame = frames[index];
@@ -832,6 +916,16 @@
         document.addEventListener('keydown', (e) => {
             if (currentIndex < 0 || updateInProgress) return;
 
+            // Don't intercept keys when user is interacting with form elements
+            const activeElement = document.activeElement;
+            if (activeElement && (
+                activeElement.tagName === 'SELECT' ||
+                activeElement.tagName === 'INPUT' ||
+                activeElement.tagName === 'TEXTAREA'
+            )) {
+                return; // Let the form element handle the key
+            }
+
             switch(e.key) {
                 case 'ArrowLeft':
                     setStatus('bad');
@@ -858,6 +952,7 @@
                     advanceToNextUndecided();
                     break;
                 case 'ArrowUp':
+                    e.preventDefault(); // Prevent focus moving to filter dropdowns
                     // Go to previous frame in filtered set
                     const prevFilteredIndex = filteredFrames.indexOf(frames[currentIndex]);
                     if (prevFilteredIndex > 0) {

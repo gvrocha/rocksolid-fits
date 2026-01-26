@@ -353,14 +353,24 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
     return path
 
 def generate_filename(original_filepath, metadata, rename_files):
-    """Generate output filename with timestamp suffix including milliseconds"""
+    """Generate output filename with timezone-adjusted timestamp suffix including milliseconds"""
     original_name = os.path.basename(original_filepath)
     name_without_ext = os.path.splitext(original_name)[0]
     ext = os.path.splitext(original_filepath)[1]
     
+    # Use adjusted_timestamp if available, otherwise fall back to timestamp
+    timestamp = metadata.get('adjusted_timestamp', metadata['timestamp'])
+    
+    # Get timezone offset for filename
+    tz_offset = metadata.get('tz_offset_hours', None)
+    if tz_offset is not None:
+        # Format as UTC+/-X (e.g., UTC-6, UTC+0)
+        tz_str = f"utc{tz_offset:+.0f}".replace('+', 'plus').replace('-', 'minus')
+    else:
+        tz_str = "utc"
+    
     if rename_files:
         frame_type = metadata['frame_type']
-        timestamp = metadata['timestamp']
         filter_str = metadata['filter']  # Always present now (either actual filter or 'nofilter')
         gain = metadata['gain']
         exp_str = format_exposure(metadata['exposure'])
@@ -372,25 +382,25 @@ def generate_filename(original_filepath, metadata, rename_files):
         is_flat = 'flat' in frame_type
         
         if is_bias:
-            # Bias: frametype_timestamp_gain (no filter, no temp, no exposure)
-            base_name = f"{frame_type}_{timestamp}_{gain}"
+            # Bias: frametype_timestamp_tz_gain (no filter, no temp, no exposure)
+            base_name = f"{frame_type}_{timestamp}_{tz_str}_{gain}"
         elif is_flat:
-            # Flats: frametype_timestamp_filter_gain (no temp, exposure irrelevant)
-            base_name = f"{frame_type}_{timestamp}_{filter_str}_{gain}"
+            # Flats: frametype_timestamp_tz_filter_gain (no temp, exposure irrelevant)
+            base_name = f"{frame_type}_{timestamp}_{tz_str}_{filter_str}_{gain}"
         elif is_dark:
-            # Darks: frametype_timestamp_gain_exposure_temp (no filter, no target)
-            base_name = f"{frame_type}_{timestamp}_{gain}_{exp_str}_{temp}"
+            # Darks: frametype_timestamp_tz_gain_exposure_temp (no filter, no target)
+            base_name = f"{frame_type}_{timestamp}_{tz_str}_{gain}_{exp_str}_{temp}"
         else:
-            # Lights: frametype_timestamp_target_filter_gain_exposure_temp
+            # Lights: frametype_timestamp_tz_target_filter_gain_exposure_temp
             target = metadata['target']
-            base_name = f"{frame_type}_{timestamp}_{target}_{filter_str}_{gain}_{exp_str}_{temp}"
+            base_name = f"{frame_type}_{timestamp}_{tz_str}_{target}_{filter_str}_{gain}_{exp_str}_{temp}"
         
         base_name = sanitize_name(base_name)
         filename = f"{base_name}{ext}"
     else:
-        # Use original name (sanitized to lowercase) with timestamp suffix
+        # Use original name (sanitized to lowercase) with timestamp and timezone suffix
         base_name = sanitize_name(name_without_ext)
-        filename = f"{base_name}_{metadata['timestamp']}{ext}"
+        filename = f"{base_name}_{timestamp}_{tz_str}{ext}"
     
     return filename
 
@@ -542,7 +552,7 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
     # Open TSV file for writing
     with open(tsv_path, 'w') as tsv_file:
         # Write header with metadata columns
-        tsv_file.write('sequence_number\torigin_file\tdestination_file\taction\tframe_type\ttarget\tfilter\texposure_sec\tgain\ttemperature_c\ttemp_folder\ttimestamp\n')
+        tsv_file.write('sequence_number\torigin_file\tdestination_file\taction\tframe_type\ttarget\tfilter\texposure_sec\tgain\ttemperature_c\ttemp_folder\ttimestamp\tsession_date\ttz_offset_hours\n')
         
         sequence_number = 0
         
@@ -555,11 +565,32 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
             # Get temperature folder for this file
             temp_folder = temp_folder_map.get(filepath, 'unknown_temp')
             
+            # Compute timezone-adjusted timestamp for filename
+            adjusted_timestamp = metadata['timestamp']  # Default: no adjustment
+            if tz_offset_hours is not None and metadata['timestamp']:
+                timestamp_str = metadata['timestamp']
+                if len(timestamp_str) >= 15:
+                    try:
+                        date_str = timestamp_str[:8]
+                        time_str = timestamp_str[9:15]
+                        milliseconds = timestamp_str[16:19] if len(timestamp_str) >= 19 else '000'
+                        
+                        dt = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M%S")
+                        dt = dt + timedelta(hours=tz_offset_hours)
+                        
+                        adjusted_timestamp = f"{dt.strftime('%Y%m%d_%H%M%S')}_{milliseconds}"
+                    except:
+                        pass  # Use original if computation fails
+            
+            # Add adjusted timestamp and tz_offset to metadata for filename generation
+            metadata['adjusted_timestamp'] = adjusted_timestamp
+            metadata['tz_offset_hours'] = tz_offset_hours
+            
             # Determine output directory
             output_dir = get_output_path(metadata, output_folder, use_calibration_library, temp_folder)
             os.makedirs(output_dir, exist_ok=True)
             
-            # Generate filename with timestamp
+            # Generate filename with timezone-adjusted timestamp
             new_filename = generate_filename(filepath, metadata, rename_files)
             output_path = os.path.join(output_dir, new_filename)
             
@@ -580,10 +611,33 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
             
             timestamp_str = metadata['timestamp']
             
+            # Compute session_date from timestamp with timezone offset
+            session_date_str = ''
+            if timestamp_str and len(timestamp_str) >= 15:
+                try:
+                    date_str = timestamp_str[:8]
+                    time_str = timestamp_str[9:15]
+                    dt = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M%S")
+                    
+                    # Apply timezone offset if available
+                    if tz_offset_hours is not None:
+                        dt = dt + timedelta(hours=tz_offset_hours)
+                    
+                    # Apply noon-to-noon logic for session grouping
+                    if dt.hour < 12:
+                        dt = dt - timedelta(days=1)
+                    
+                    session_date_str = dt.strftime('%Y%m%d')
+                except:
+                    session_date_str = ''
+            
+            # Format tz_offset for TSV
+            tz_offset_str = f'{tz_offset_hours}' if tz_offset_hours is not None else ''
+            
             # Check if file already exists
             if os.path.exists(output_path):
                 # Log the skip with destination and metadata
-                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_exists\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_exists\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
                 skipped += 1
                 warnings += 1
                 continue
@@ -593,12 +647,12 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
                 shutil.copy2(filepath, output_path)
                 
                 # Log successful copy with metadata
-                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tcopied\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tcopied\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
                 processed += 1
                 
             except Exception as e:
                 # Log the error with metadata (suppress console output)
-                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_error\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\n')
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_error\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
                 skipped += 1
                 errors += 1
             
@@ -844,7 +898,7 @@ Examples:
         print("=" * 60)
         db_path = get_database_path(args.output_folder)
         ensure_database_schema(db_path)
-        import_fits_frames(log_file, db_path)
+        import_fits_frames(log_file, db_path, tz_offset_hours=args.tz_offset)
         print()
         print("Importing FITS headers...")
         import_fits_headers_only(log_file, db_path)
