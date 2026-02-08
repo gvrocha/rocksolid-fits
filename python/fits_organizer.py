@@ -202,12 +202,32 @@ def round_temp(temp):
     """Round temperature using floor(temp + 0.5) for consistent rounding"""
     return math.floor(temp + 0.5)
 
+def get_temp_bin_center(temp):
+    """
+    Get the center temperature of the 5C bin that contains the given temperature.
+    
+    Bins are centered at ..., -20, -15, -10, -5, 0, +5, +10, +15, +20, ...
+    Each bin spans ±2.5C from its center.
+    
+    Examples:
+        -21.0 -> -20  (bin [-22.5, -17.5))
+        -18.0 -> -15  (bin [-17.5, -12.5))
+        -10.0 -> -10  (bin [-12.5, -7.5))
+        -2.0  -> 0    (bin [-2.5, +2.5))
+        +3.0  -> +5   (bin [+2.5, +7.5))
+    """
+    # Determine which 5C bin this temperature falls into
+    # bins are: ..., [-22.5, -17.5), [-17.5, -12.5), [-12.5, -7.5), ..., [-2.5, +2.5), [+2.5, +7.5), ...
+    # Use floor division to handle boundaries correctly
+    bin_center = math.floor((temp + 2.5) / 5.0) * 5
+    return int(bin_center)
+
 def format_temp_folder(temp_int):
-    """Format a single temperature integer as folder name"""
+    """Format a single temperature integer as folder name for 5C bin"""
     if temp_int >= 0:
-        return f'{temp_int}c'
+        return f'pos{temp_int:03d}c_range'
     else:
-        return f'minus{abs(temp_int)}c'
+        return f'neg{abs(temp_int):03d}c_range'
 
 def format_temp_range(min_temp, max_temp):
     """Format temperature range for folder name using floor/ceil"""
@@ -225,18 +245,18 @@ def determine_temp_folders(temps, is_calibration):
     
     Returns: dict mapping each temp to its folder suffix
     
-    For calibration frames: individual rounded temp folders
+    For calibration frames (darks/bias): 5C bins (-20C_range, -15C_range, etc.)
     For session frames: range-based folders with deviants if needed
     """
     if not temps:
         return {}
     
-    # For calibration library: use individual rounded temps
+    # For calibration library: use 5C bins
     if is_calibration:
         temp_folders = {}
         for temp in temps:
-            rounded = round_temp(temp)
-            temp_folders[temp] = format_temp_folder(rounded)
+            bin_center = get_temp_bin_center(temp)
+            temp_folders[temp] = format_temp_folder(bin_center)
         return temp_folders
     
     # For session frames: check range

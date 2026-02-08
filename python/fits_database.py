@@ -46,6 +46,7 @@ def ensure_database_schema(db_path):
             CREATE TABLE fits_frames (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_date TEXT NOT NULL,
+                frame_type TEXT NOT NULL,
                 target TEXT,
                 filter TEXT,
                 gain TEXT,
@@ -70,6 +71,9 @@ def ensure_database_schema(db_path):
         ''')
         cursor.execute('''
             CREATE INDEX idx_frames_dest_file ON fits_frames(destination_file)
+        ''')
+        cursor.execute('''
+            CREATE INDEX idx_frames_type ON fits_frames(frame_type)
         ''')
         
         # Long/skinny metadata table - stores all FITS header metadata
@@ -222,11 +226,12 @@ def import_fits_frames(tsv_file, db_path, tz_offset_hours=None):
             
             cursor.execute('''
                 INSERT INTO fits_frames 
-                (session_date, target, filter, gain, exposure_sec, temperature_c, 
+                (session_date, frame_type, target, filter, gain, exposure_sec, temperature_c, 
                  recorded_timestamp, tz_offset_hours, timestamp, source_file, destination_file, file_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 session_date,
+                row.get('frame_type', ''),
                 row.get('target', ''),
                 row.get('filter', ''),
                 row.get('gain', ''),
