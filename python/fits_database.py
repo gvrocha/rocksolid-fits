@@ -47,9 +47,11 @@ def ensure_database_schema(db_path):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_date TEXT NOT NULL,
                 frame_type TEXT NOT NULL,
+                camera TEXT,
                 target TEXT,
                 filter TEXT,
-                gain TEXT,
+                gain REAL,
+                offset REAL,
                 exposure_sec REAL,
                 temperature_c REAL,
                 recorded_timestamp TEXT,
@@ -63,6 +65,9 @@ def ensure_database_schema(db_path):
         ''')
         
         # Index for common queries
+        cursor.execute('''
+            CREATE INDEX idx_frames_camera ON fits_frames(camera)
+        ''')
         cursor.execute('''
             CREATE INDEX idx_frames_target ON fits_frames(target)
         ''')
@@ -226,15 +231,17 @@ def import_fits_frames(tsv_file, db_path, tz_offset_hours=None):
             
             cursor.execute('''
                 INSERT INTO fits_frames 
-                (session_date, frame_type, target, filter, gain, exposure_sec, temperature_c, 
+                (session_date, frame_type, camera, target, filter, gain, offset, exposure_sec, temperature_c, 
                  recorded_timestamp, tz_offset_hours, timestamp, source_file, destination_file, file_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 session_date,
                 row.get('frame_type', ''),
+                row.get('camera', ''),
                 row.get('target', ''),
                 row.get('filter', ''),
-                row.get('gain', ''),
+                row.get('gain', None),
+                row.get('offset', None) or None,
                 row.get('exposure_sec', None),
                 row.get('temperature_c', None),
                 recorded_timestamp,

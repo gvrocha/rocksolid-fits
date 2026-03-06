@@ -79,8 +79,28 @@ def extract_metadata(filepath, tz_offset_hours=None):
             header = hdul[0].header
             
             # Frame type
-            frame_type = header.get('FRAME', header.get('IMAGETYP', 'Unknown'))
+            frame_type = header.get('FRAME', header.get('IMAGETYP', None))
+            if frame_type is None:
+                print(f"ERROR: No frame type (FRAME/IMAGETYP) in header: {filepath}")
+                return None
             frame_type = sanitize_name(frame_type)
+
+            # Normalize frame type variants to canonical names
+            _FRAME_TYPE_MAP = {
+                'light':      'light',
+                'lights':     'light',
+                'dark':       'dark',
+                'darks':      'dark',
+                'flat':       'flat',
+                'flat_field': 'flat',
+                'flatfield':  'flat',
+                'bias':       'bias',
+                'biasframe':  'bias',
+            }
+            if frame_type not in _FRAME_TYPE_MAP:
+                print(f"ERROR: Unrecognized frame type '{frame_type}' in: {filepath}")
+                return None
+            frame_type = _FRAME_TYPE_MAP[frame_type]
             
             # Exposure time
             exposure = header.get('EXPTIME', header.get('EXPOSURE', 0.0))
@@ -89,11 +109,33 @@ def extract_metadata(filepath, tz_offset_hours=None):
             except (ValueError, TypeError):
                 exposure = 0.0
             
+            # Camera
+            camera = header.get('INSTRUME', None)
+            if camera is not None:
+                camera_str = sanitize_name(str(camera))
+            else:
+                camera_str = 'unknown_camera'
+
             # Gain
-            gain = header.get('GAIN', 'unknown')
-            gain = sanitize_name(str(gain))
-            if not gain.startswith('gain'):
-                gain = f'gain{gain}'
+            gain_val = header.get('GAIN', None)
+            try:
+                gain_raw = int(gain_val) if gain_val is not None else None
+            except (ValueError, TypeError):
+                gain_raw = None
+            gain = f'gain{gain_raw}' if gain_raw is not None else 'gain_unknown'
+
+            # Offset
+            offset_val = header.get('OFFSET', None)
+            if offset_val is not None:
+                try:
+                    offset_raw = int(offset_val)
+                    offset_str = f'offset{offset_raw}'
+                except (ValueError, TypeError):
+                    offset_raw = None
+                    offset_str = 'offset_unknown'
+            else:
+                offset_raw = None
+                offset_str = 'offset_unknown'
             
             # Filter
             filter_val = header.get('FILTER', None)
@@ -135,10 +177,10 @@ def extract_metadata(filepath, tz_offset_hours=None):
                         # Use provided timezone offset (preferred method)
                         calculated_tz_offset = tz_offset_hours
                     else:
-                        # FALLBACK: Try to get longitude for astronomical timezone calculation
-                        # NOTE: ASIAIR does not write SITELON/SITELONG to FITS headers,
-                        # so this fallback is unlikely to work with ASIAIR files.
-                        # Kept for compatibility with other software that may include location data.
+                        # FALLBACK: Try to get longitude for astronomical timezone calculation.
+                        # ASIAIR writes SITELON but sets it to 0.0 if location is not configured.
+                        # NINA also writes SITELON but may be 0.0 for unconfigured profiles.
+                        # Using --tz-offset is always preferred over this fallback.
                         site_lon = header.get('SITELON', header.get('SITELONG', header.get('LONG-OBS', None)))
                         
                         if site_lon is not None:
@@ -178,7 +220,11 @@ def extract_metadata(filepath, tz_offset_hours=None):
                 'frame_type': frame_type,
                 'exposure': exposure,
                 'gain': gain,
+                'gain_raw': gain_raw,
+                'offset': offset_str,
+                'offset_raw': offset_raw,
                 'filter': filter_str,
+                'camera': camera_str,
                 'temp': temp_str,
                 'temp_raw': temp_raw,
                 'target': target,
@@ -308,43 +354,44 @@ def determine_temp_folders(temps, is_calibration):
 def get_output_path(metadata, output_base, use_calibration_library, temp_folder):
     """
     Determine output path based on frame type
-    
-    Calibration Library (darks/bias):
-      calibration/darks/<gain>/<exposure>/<temp>/
-      calibration/bias/<gain>/
-    
-    Session structure (lights/flats, or darks/bias if CalibLib=No):
-      sessions/<date>/darks/<gain>/<exposure>/<filter?>/<temp_range>/
-      sessions/<date>/bias/<gain>/<filter?>/
-      sessions/<date>/flats/<gain>/<filter?>/
-      sessions/<date>/<target>/<gain>/<exposure>/<filter?>/<temp_range>/
-    
-    Filter is optional - only added if present in metadata
-    temp_folder: the temperature folder suffix (e.g., 'minus20c' or 'minus21c_to_minus18c')
+
+    Structure:
+      <output_base>/<camera>/calibration/darks/<gain>/<offset>/<exposure>/<temp>/
+      <output_base>/<camera>/calibration/bias/<gain>/
+      <output_base>/<camera>/sessions/<date>/<target>/<gain>/<exposure>/<filter>/<temp>/
+      <output_base>/<camera>/sessions/<date>/flats/<gain>/<filter>/
+      <output_base>/<camera>/sessions/<date>/darks/<gain>/<offset>/<exposure>/<filter>/<temp>/
+      <output_base>/<camera>/sessions/<date>/bias/<gain>/<filter>/
+
+    temp_folder: the temperature folder suffix (e.g., 'neg020c_range' or 'minus21c_to_minus18c')
     """
     frame_type = metadata['frame_type']
     filter_str = metadata.get('filter', None)
-    
+    camera_str = metadata.get('camera', 'unknown_camera')
+
     is_dark = 'dark' in frame_type
     is_bias = 'bias' in frame_type
     is_flat = 'flat' in frame_type
     is_light = not (is_dark or is_bias or is_flat)
-    
+
+    camera_base = os.path.join(output_base, camera_str)
+
     if use_calibration_library and (is_dark or is_bias):
-        # Calibration library: gain -> exposure -> temp (no filter)
+        # Calibration library: gain -> offset -> exposure -> temp (no filter)
         if is_dark:
             exp_str = format_exposure(metadata['exposure'])
             path = os.path.join(
-                output_base,
+                camera_base,
                 'calibration',
                 'darks',
                 metadata['gain'],
+                metadata['offset'],
                 exp_str,
                 temp_folder
             )
         else:  # bias - no temperature folder
             path = os.path.join(
-                output_base,
+                camera_base,
                 'calibration',
                 'bias',
                 metadata['gain']
@@ -352,24 +399,22 @@ def get_output_path(metadata, output_base, use_calibration_library, temp_folder)
     else:
         # Session-based structure - always include filter
         session_base = os.path.join(
-            output_base,
+            camera_base,
             'sessions',
             metadata['session_date']
         )
-        
+
         if is_dark:
             exp_str = format_exposure(metadata['exposure'])
-            path = os.path.join(session_base, 'darks', metadata['gain'], exp_str, filter_str, temp_folder)
+            path = os.path.join(session_base, 'darks', metadata['gain'], metadata['offset'], exp_str, filter_str, temp_folder)
         elif is_bias:
-            # Bias: no temperature folder
             path = os.path.join(session_base, 'bias', metadata['gain'], filter_str)
         elif is_flat:
-            # Flats: no temperature folder
             path = os.path.join(session_base, 'flats', metadata['gain'], filter_str)
         else:  # lights
             exp_str = format_exposure(metadata['exposure'])
             path = os.path.join(session_base, metadata['target'], metadata['gain'], exp_str, filter_str, temp_folder)
-    
+
     return path
 
 def generate_filename(original_filepath, metadata, rename_files):
@@ -408,8 +453,8 @@ def generate_filename(original_filepath, metadata, rename_files):
             # Flats: frametype_timestamp_tz_filter_gain (no temp, exposure irrelevant)
             base_name = f"{frame_type}_{timestamp}_{tz_str}_{filter_str}_{gain}"
         elif is_dark:
-            # Darks: frametype_timestamp_tz_gain_exposure_temp (no filter, no target)
-            base_name = f"{frame_type}_{timestamp}_{tz_str}_{gain}_{exp_str}_{temp}"
+            # Darks: frametype_timestamp_tz_gain_offset_exposure_temp (no filter, no target)
+            base_name = f"{frame_type}_{timestamp}_{tz_str}_{gain}_{metadata['offset']}_{exp_str}_{temp}"
         else:
             # Lights: frametype_timestamp_tz_target_filter_gain_exposure_temp
             target = metadata['target']
@@ -499,9 +544,9 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
         
         # Create group key
         if is_calibration:
-            # Calibration library groups: frame_type, gain, exposure (no filter)
+            # Calibration library groups: camera, frame_type, gain, offset, exposure (no filter)
             if is_dark:
-                group_key = ('calibration', frame_type, metadata['gain'], metadata['exposure'])
+                group_key = ('calibration', frame_type, metadata['camera'], metadata['gain'], metadata['offset'], metadata['exposure'])
             else:  # bias
                 group_key = ('calibration', frame_type, metadata['gain'], None)
         else:
@@ -572,7 +617,7 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
     # Open TSV file for writing
     with open(tsv_path, 'w') as tsv_file:
         # Write header with metadata columns
-        tsv_file.write('sequence_number\torigin_file\tdestination_file\taction\tframe_type\ttarget\tfilter\texposure_sec\tgain\ttemperature_c\ttemp_folder\ttimestamp\tsession_date\ttz_offset_hours\n')
+        tsv_file.write('sequence_number\torigin_file\tdestination_file\taction\tframe_type\ttarget\tfilter\texposure_sec\tcamera\tgain\toffset\ttemperature_c\ttemp_folder\ttimestamp\tsession_date\ttz_offset_hours\n')
         
         sequence_number = 0
         
@@ -618,9 +663,11 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
             frame_type = metadata['frame_type']
             # Target only for light frames
             target = metadata['target'] if 'light' in frame_type else ''
-            filter_str = metadata['filter']  # Always present now
+            filter_str = metadata['filter']
             exposure = metadata['exposure']
-            gain = metadata['gain']
+            camera = metadata['camera']
+            gain = metadata['gain_raw'] if metadata['gain_raw'] is not None else ''
+            offset = metadata['offset_raw'] if metadata['offset_raw'] is not None else ''
             
             # Temperature value for TSV
             temp_raw = metadata['temp_raw']
@@ -657,7 +704,7 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
             # Check if file already exists
             if os.path.exists(output_path):
                 # Log the skip with destination and metadata
-                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_exists\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_exists\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{camera}\t{gain}\t{offset}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
                 skipped += 1
                 warnings += 1
                 continue
@@ -667,12 +714,12 @@ def organize_fits_files(input_folder, output_folder, use_calibration_library=Tru
                 shutil.copy2(filepath, output_path)
                 
                 # Log successful copy with metadata
-                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tcopied\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tcopied\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{camera}\t{gain}\t{offset}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
                 processed += 1
                 
             except Exception as e:
                 # Log the error with metadata (suppress console output)
-                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_error\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{gain}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
+                tsv_file.write(f'{sequence_number}\t{filepath}\t{output_path}\tskipped_error\t{frame_type}\t{target}\t{filter_str}\t{exposure}\t{camera}\t{gain}\t{offset}\t{temp_value}\t{temp_folder}\t{timestamp_str}\t{session_date_str}\t{tz_offset_str}\n')
                 skipped += 1
                 errors += 1
             
@@ -856,16 +903,21 @@ Examples:
     %(prog)s
   
   CLI mode - basic organization (US Central timezone, files renamed by default):
-    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6
+    %(prog)s /raw/data /organized --tz-offset -6
   
   CLI mode - keep original filenames:
-    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --no-rename
+    %(prog)s /raw/data /organized --tz-offset -6 --no-rename
   
   CLI mode - session-only, no calibration library:
-    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -6 --no-calib-library
+    %(prog)s /raw/data /organized --tz-offset -6 --no-calib-library
   
   CLI mode - for Brazil imaging trip (São Paulo/Brasília):
-    %(prog)s /raw/data /organized/asi294mc_pro --tz-offset -3
+    %(prog)s /raw/data /organized --tz-offset -3
+
+  Output folder structure (camera detected automatically from INSTRUME header):
+    /organized/zwo_asi294mc_pro/calibration/darks/gain120/offset30/180s/neg020c_range/
+    /organized/zwo_asi294mc_pro/sessions/20260201/m51/gain120/180s/nofilter/minus20c_to_minus18c/
+    /organized/zwo_asi2600mm_pro/calibration/darks/gain200/offset40/600s/neg010c_range/
 '''
     )
     parser.add_argument('input_folder', help='Input folder path (where FITS files are)')
