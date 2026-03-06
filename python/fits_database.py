@@ -713,3 +713,48 @@ def import_fits_metadata(tsv_file, db_path):
     print(f"Imported metadata from {files_processed} FITS files ({total_metadata_inserted} metadata entries)")
     print(f"Skipped {files_skipped} files (already processed or not found)")
     return files_processed
+
+
+
+def create_analysis_views(db_path):
+    """Create or update analysis views"""
+    views = [
+        """
+        CREATE VIEW IF NOT EXISTS light_frames_count_per_session AS
+        SELECT 
+            session_date, 
+            target, 
+            gain, 
+            exposure_sec, 
+            COUNT(DISTINCT destination_file) AS n_frames
+        FROM fits_frames
+        JOIN fits_jpeg_review ON fits_jpeg_review.fits_file_id = fits_frames.id
+        WHERE 
+            frame_type = 'LIGHT'
+            AND review_status = 'selected'
+        GROUP BY session_date, target, gain, exposure_sec
+        ORDER BY session_date, target, gain, exposure_sec
+        """,
+        """
+        CREATE VIEW IF NOT EXISTS flat_frames_count_per_session AS
+        SELECT 
+            session_date,
+            gain, 
+            temperature_c, 
+            COUNT(DISTINCT destination_file) AS n_flats
+        FROM fits_frames
+        JOIN fits_jpeg_review ON fits_jpeg_review.fits_file_id = fits_frames.id
+        WHERE 
+            frame_type = 'FLAT'
+            AND review_status = 'selected'
+        GROUP BY session_date, gain, temperature_c
+        ORDER BY session_date, gain, temperature_c
+        """
+    ]
+    
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    for view_sql in views:
+        cursor.execute(view_sql)
+    conn.commit()
+    conn.close()

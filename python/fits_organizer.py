@@ -21,7 +21,7 @@ except ImportError:
 
 # Import database module
 try:
-    from fits_database import ensure_database_schema, import_fits_frames, import_fits_headers_only, get_database_path
+    from fits_database import ensure_database_schema, import_fits_frames, import_fits_headers_only, get_database_path, create_analysis_views
     FITS_DATABASE_AVAILABLE = True
 except ImportError:
     print("Warning: fits_database.py not found. Database features will be disabled.")
@@ -918,6 +918,7 @@ Examples:
         print("=" * 60)
         db_path = get_database_path(args.output_folder)
         ensure_database_schema(db_path)
+        create_analysis_views(db_path)
         import_fits_frames(log_file, db_path, tz_offset_hours=args.tz_offset)
         print()
         print("Importing FITS headers...")

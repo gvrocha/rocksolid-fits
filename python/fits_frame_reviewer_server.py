@@ -9,7 +9,7 @@ import sys
 import argparse
 import sqlite3
 from pathlib import Path
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory, redirect
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -32,10 +32,28 @@ def get_db_connection():
 
 @app.route('/')
 def index():
-    """Serve the main HTML page"""
+    """Serve the main index page with tool selection"""
+    html_path = Path(__file__).parent / 'fits_frame_tools_index.html'
+    if not html_path.exists():
+        return "Error: fits_frame_tools_index.html not found in same directory as server", 404
+    return send_file(str(html_path))
+
+
+@app.route('/selector')
+def selector():
+    """Serve the frame reviewer HTML page"""
     html_path = Path(__file__).parent / 'fits_frame_reviewer.html'
     if not html_path.exists():
         return "Error: fits_frame_reviewer.html not found in same directory as server", 404
+    return send_file(str(html_path))
+
+
+@app.route('/grouper')
+def grouper():
+    """Serve the frame grouper HTML page"""
+    html_path = Path(__file__).parent / 'fits_frame_grouper.html'
+    if not html_path.exists():
+        return "Error: fits_frame_grouper.html not found in same directory as server", 404
     return send_file(str(html_path))
 
 
@@ -253,6 +271,85 @@ def get_stats():
         
         conn.close()
         return jsonify(stats)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/copy-to-temp', methods=['POST'])
+def copy_to_temp():
+    """
+    Copy selected files to temporary folder
+    
+    Request body: {
+        "files": [list of file paths],
+        "target": "M31",
+        "session_date": "20250119",
+        "gain": "gain120",
+        "exposure": 180,
+        "filter": "nofilter",
+        "temp_range": "neg020c_range"
+    }
+    
+    Creates folder: /tmp/<target>_<session_date>_<gain>_<exposure>_<filter>_<temp_range>_<timestamp>/
+    """
+    import subprocess
+    from datetime import datetime
+    
+    try:
+        data = request.get_json()
+        files = data.get('files', [])
+        target = data.get('target', 'unknown')
+        session_date = data.get('session_date', 'unknown')
+        gain = data.get('gain', 'unknown')
+        exposure = data.get('exposure', 'unknown')
+        filter_name = data.get('filter', 'unknown')
+        temp_range = data.get('temp_range', 'unknown')
+        
+        if not files:
+            return jsonify({'error': 'No files specified'}), 400
+        
+        # Create timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Format exposure (remove .0 if whole number)
+        exposure_str = f"{int(exposure)}s" if isinstance(exposure, (int, float)) and exposure == int(exposure) else f"{exposure}s"
+        
+        # Create folder name
+        folder_name = f"{target}_{session_date}_{gain}_{exposure_str}_{filter_name}_{temp_range}_{timestamp}"
+        dest_folder = os.path.join('/tmp', folder_name)
+        
+        # Create destination folder
+        os.makedirs(dest_folder, exist_ok=True)
+        
+        # Copy files using cp -pr
+        copied_count = 0
+        failed_files = []
+        
+        for file_path in files:
+            if not os.path.exists(file_path):
+                failed_files.append(file_path)
+                continue
+            
+            try:
+                # Use subprocess to run cp -pr
+                subprocess.run(['cp', '-pr', file_path, dest_folder], check=True)
+                copied_count += 1
+            except subprocess.CalledProcessError as e:
+                failed_files.append(file_path)
+        
+        result = {
+            'success': True,
+            'destination': dest_folder,
+            'copied_count': copied_count,
+            'total_count': len(files),
+            'failed_count': len(failed_files)
+        }
+        
+        if failed_files:
+            result['failed_files'] = failed_files
+        
+        return jsonify(result)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
